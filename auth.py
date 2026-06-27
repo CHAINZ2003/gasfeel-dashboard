@@ -12,18 +12,12 @@ import streamlit as st
 # Add or remove users here.
 # To change a password — just update the value next to the name.
 # ============================================================
-USERS = {
-    "admin":    "gasfeel2026",
-    "mubarak":  "mubarak123",
-    "user1":    "gasfeel001",
-    "user2":    "gasfeel002",
-    "user3":    "gasfeel003",
-    "user4":    "gasfeel004",
-    "user5":    "gasfeel005",
-    "user6":    "gasfeel006",
-    "user7":    "gasfeel007",
-    "user8":    "gasfeel008",
-}
+# ============================================================
+# USER CREDENTIALS — loaded from Streamlit secrets
+# To add users: update secrets.toml locally and
+# Streamlit Cloud secrets in the dashboard settings.
+# ============================================================
+USERS = st.secrets["USERS"]
 
 # ============================================================
 # LOGIN PAGE RENDERER
