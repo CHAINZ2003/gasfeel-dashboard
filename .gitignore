@@ -1,0 +1,16 @@
+# ============================================================
+# .GITIGNORE — Files that must NEVER be pushed to GitHub
+# ============================================================
+
+# Streamlit secrets — contains sensitive URLs and passwords
+.streamlit/secrets.toml
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment files
+.env
+*.env
+
