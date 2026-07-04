@@ -391,3 +391,87 @@ def render_customer(df):
     )
 
     st.plotly_chart(fig_status_monthly, use_container_width=True)
+    # --------------------------------------------------------
+    # CUSTOMER LISTS BY STATUS
+    # Shows names of Active, At Risk, and Churned customers
+    # so the team can act on them directly.
+    # --------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>📋 Customer List by Status</div>", unsafe_allow_html=True)
+
+    # Build full customer status table with last order date
+    customer_status_df = df.groupby("Customer Name").agg(
+        Last_Order=("Date of Order", "max"),
+        Total_Orders=("Order ID", "count"),
+        Total_Revenue=("Revenue", "sum")
+    ).reset_index()
+    customer_status_df["Days Since Order"] = (
+        today - customer_status_df["Last_Order"]
+    ).dt.days
+    customer_status_df["Status"] = customer_status_df["Days Since Order"].apply(
+        lambda x: "Active" if x <= 30 else ("At Risk" if x <= 60 else "Churned")
+    )
+    customer_status_df["Last Order"] = customer_status_df["Last_Order"].dt.strftime("%d %b %Y")
+    customer_status_df["Revenue"] = customer_status_df["Total_Revenue"].apply(format_naira)
+    customer_status_df = customer_status_df.rename(columns={
+        "Customer Name": "Customer",
+        "Total_Orders": "Orders",
+        "Days Since Order": "Days Since Last Order"
+    })[["Customer", "Status", "Last Order", "Days Since Last Order", "Orders", "Revenue"]]
+
+    # Three columns — one per status
+    col_active, col_risk, col_churned = st.columns(3)
+
+    with col_active:
+        st.markdown("""
+            <div style='background:#efffef;border-left:4px solid #00aa44;
+                        border-radius:10px;padding:12px 16px;margin-bottom:12px;'>
+                <span style='color:#006622;font-size:12px;font-weight:800;
+                             text-transform:uppercase;'>✅ Active Customers</span>
+            </div>
+        """, unsafe_allow_html=True)
+        active_list = customer_status_df[
+            customer_status_df["Status"] == "Active"
+        ].sort_values("Days Since Last Order")
+        st.dataframe(
+            active_list[["Customer", "Last Order", "Days Since Last Order", "Orders", "Revenue"]],
+            use_container_width=True,
+            hide_index=True,
+            height=400
+        )
+
+    with col_risk:
+        st.markdown("""
+            <div style='background:#fff8e6;border-left:4px solid #f0a500;
+                        border-radius:10px;padding:12px 16px;margin-bottom:12px;'>
+                <span style='color:#b37a00;font-size:12px;font-weight:800;
+                             text-transform:uppercase;'>⚠️ At Risk Customers</span>
+            </div>
+        """, unsafe_allow_html=True)
+        risk_list = customer_status_df[
+            customer_status_df["Status"] == "At Risk"
+        ].sort_values("Days Since Last Order")
+        st.dataframe(
+            risk_list[["Customer", "Last Order", "Days Since Last Order", "Orders", "Revenue"]],
+            use_container_width=True,
+            hide_index=True,
+            height=400
+        )
+
+    with col_churned:
+        st.markdown("""
+            <div style='background:#fff0f0;border-left:4px solid #cc0000;
+                        border-radius:10px;padding:12px 16px;margin-bottom:12px;'>
+                <span style='color:#990000;font-size:12px;font-weight:800;
+                             text-transform:uppercase;'>❌ Churned Customers</span>
+            </div>
+        """, unsafe_allow_html=True)
+        churned_list = customer_status_df[
+            customer_status_df["Status"] == "Churned"
+        ].sort_values("Days Since Last Order", ascending=False)
+        st.dataframe(
+            churned_list[["Customer", "Last Order", "Days Since Last Order", "Orders", "Revenue"]],
+            use_container_width=True,
+            hide_index=True,
+            height=400
+        )

@@ -427,12 +427,13 @@ st.markdown(f"""
 # ============================================================
 # NAVIGATION TABS
 # ============================================================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Sales Tracker",
     "💰 Revenue",
     "📦 Product",
     "👥 Customer",
-    "🚴 Operation"
+    "🚴 Operation",
+    "🧠 Insights"
 ])
 
 with tab1:
@@ -454,3 +455,7 @@ with tab4:
 with tab5:
     from pages.operation import render_operation
     render_operation(filtered_df)
+
+with tab6:
+    from pages.insights import render_insights
+    render_insights(filtered_df, targets)
