@@ -90,6 +90,7 @@ def render_sales_tracker(df, targets):
     def calc(d):
         return {
             "gmv": d["Revenue (Total Customer Payment)"].sum(),
+            "revenue": d["Revenue"].sum(),
             "orders": len(d),
             "profit": d["Profit"].sum(),
             "break_even": d["COGS(naira)"].sum() + d["Delivery Cost (how much we paid to the Rider)"].sum()
@@ -103,11 +104,12 @@ def render_sales_tracker(df, targets):
     # --------------------------------------------------------
     # SUMMARY METRICS
     # --------------------------------------------------------
-    total_rev = df["Revenue (Total Customer Payment)"].sum()
+    GMV = df["Revenue (Total Customer Payment)"].sum()
+    total_rev = df["Revenue"].sum()
     total_cogs = df["COGS(naira)"].sum()
     total_profit = df["Profit"].sum()
     total_orders = len(df)
-    rev_margin = ((total_rev - total_cogs) / total_rev * 100) if total_rev > 0 else 0
+    rev_margin = (total_rev / GMV * 100) if GMV > 0 else 0
     profit_margin = (total_profit / total_rev * 100) if total_rev > 0 else 0
     avg_daily = total_rev / max(df["Date of Order"].nunique(), 1)
     active = df[df["Date of Order"].dt.normalize() >= today - timedelta(days=30)]["Customer Name"].nunique()
@@ -132,28 +134,28 @@ def render_sales_tracker(df, targets):
     # --------------------------------------------------------
     # VS LAST WEEK
     # --------------------------------------------------------
-    lw_gmv = df[
+    lw_revenue = df[
         (df["Date of Order"].dt.normalize() >= week_start - timedelta(days=7)) &
         (df["Date of Order"].dt.normalize() <= today - timedelta(days=7))
-    ]["Revenue (Total Customer Payment)"].sum()
-    vs_lw, vs_lw_c = calc_vs(wtd["gmv"], lw_gmv)
+    ]["Revenue"].sum()
+    vs_lw, vs_lw_c = calc_vs(wtd["revenue"], lw_revenue)
 
     # --------------------------------------------------------
     # VS LAST MONTH
     # --------------------------------------------------------
     days_in = (today - month_start).days
     lm_start = (month_start - timedelta(days=1)).replace(day=1)
-    lm_gmv = df[
+    lm_revenue = df[
         (df["Date of Order"].dt.normalize() >= lm_start) &
         (df["Date of Order"].dt.normalize() <= lm_start + timedelta(days=days_in))
-    ]["Revenue (Total Customer Payment)"].sum()
-    vs_lm, vs_lm_c = calc_vs(mtd["gmv"], lm_gmv)
+    ]["Revenue"].sum()
+    vs_lm, vs_lm_c = calc_vs(mtd["revenue"], lm_revenue)
 
     # --------------------------------------------------------
     # YTD STATUS
     # --------------------------------------------------------
     if t_ytd > 0:
-        pct = ytd["gmv"] / t_ytd
+        pct = ytd["revenue"] / t_ytd
         ytd_status = "🟢 Ahead" if pct >= 1.0 else ("🟡 On Track" if pct >= 0.8 else "🔴 At Risk")
     else:
         ytd_status = "⚪ No Target"
@@ -162,7 +164,7 @@ def render_sales_tracker(df, targets):
     # REVENUE TREND
     # --------------------------------------------------------
     trend = df.groupby(["Year", "Month", "Month Name"])[
-        "Revenue (Total Customer Payment)"
+        "Revenue"
     ].sum().reset_index().sort_values(["Year", "Month"])
     trend["Label"] = trend.apply(
         lambda r: pd.Timestamp(
@@ -180,6 +182,7 @@ def render_sales_tracker(df, targets):
     with c1:
         st.markdown("<div class='section-title'>📅 Yesterday Sales</div>", unsafe_allow_html=True)
         kpi_card("GMV", format_naira(y["gmv"]))
+        kpi_card("revenue", format_naira(y["revenue"]))
         kpi_card("Orders", str(y["orders"]))
         kpi_card("Profit", format_naira(y["profit"]))
         kpi_card("Break-Even", format_naira(y["break_even"]))
@@ -187,9 +190,10 @@ def render_sales_tracker(df, targets):
     with c2:
         st.markdown("<div class='section-title'>📆 WTD Sales</div>", unsafe_allow_html=True)
         kpi_card("GMV", format_naira(wtd["gmv"]))
+        kpi_card("revenue", format_naira(wtd["revenue"]))
         kpi_card("Orders", str(wtd["orders"]))
         kpi_card("Vs Last Week", vs_lw, indicator=vs_lw, indicator_color=vs_lw_c)
-        vs_wtd, vs_wtd_c = calc_vs(wtd["gmv"], t_wtd)
+        vs_wtd, vs_wtd_c = calc_vs(wtd["revenue"], t_wtd)
         kpi_card("Vs Target", vs_wtd, indicator=vs_wtd, indicator_color=vs_wtd_c)
 
     with c3:
@@ -212,17 +216,19 @@ def render_sales_tracker(df, targets):
     with c4:
         st.markdown("<div class='section-title'>🗓️ MTD Sales</div>", unsafe_allow_html=True)
         kpi_card("GMV", format_naira(mtd["gmv"]))
+        kpi_card("revenue", format_naira(mtd["revenue"]))
         kpi_card("Orders", str(mtd["orders"]))
         kpi_card("Vs Last Month", vs_lm, indicator=vs_lm, indicator_color=vs_lm_c)
-        vs_mtd, vs_mtd_c = calc_vs(mtd["gmv"], t_mtd)
+        vs_mtd, vs_mtd_c = calc_vs(mtd["revenue"], t_mtd)
         kpi_card("Vs Target", vs_mtd, indicator=vs_mtd, indicator_color=vs_mtd_c)
 
     with c5:
         st.markdown("<div class='section-title'>📈 YTD Sales</div>", unsafe_allow_html=True)
         kpi_card("GMV", format_naira(ytd["gmv"]))
+        kpi_card("revenue", format_naira(ytd["revenue"]))
         kpi_card("Orders", str(ytd["orders"]))
         kpi_card("Status", ytd_status)
-        vs_ytd, vs_ytd_c = calc_vs(ytd["gmv"], t_ytd)
+        vs_ytd, vs_ytd_c = calc_vs(ytd["revenue"], t_ytd)
         kpi_card("Vs Target", vs_ytd, indicator=vs_ytd, indicator_color=vs_ytd_c)
 
     with c6:
@@ -231,11 +237,11 @@ def render_sales_tracker(df, targets):
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=trend["Label"],
-                y=trend["Revenue (Total Customer Payment)"],
+                y=trend["Revenue"],
                 mode="lines+markers+text",
                 line=dict(color="#003399", width=3),
                 marker=dict(color="#003399", size=9),
-                text=trend["Revenue (Total Customer Payment)"].apply(format_naira),
+                text=trend["Revenue"].apply(format_naira),
                 textposition="top center",
                 textfont=dict(size=11, color="#333333")
             ))

@@ -1,7 +1,8 @@
 # ============================================================
 # DATA LOADER — GasFeel Dashboard
-# This file handles all data fetching from Google Sheets.
+# This file handles all data fetching and cleaning from Google Sheets.
 # Uses requests library to bypass Google's redirect block.
+# All cleaning happens here so every tab receives clean data.
 # ============================================================
 
 import pandas as pd
@@ -9,61 +10,93 @@ import requests
 from io import StringIO
 import streamlit as st
 
-# ============================================================
-# GOOGLE SHEET URLs — Published to web as CSV
-# To update data source, replace only these two URLs.
-# ============================================================
 
 # ============================================================
-# GOOGLE SHEET URLs
-# Loaded from Streamlit secrets — never hardcoded here.
-# Locally: stored in .streamlit/secrets.toml
-# On Streamlit Cloud: entered via the Secrets UI in settings.
+# GOOGLE SHEET URLs — Loaded from Streamlit secrets
+# Locally stored in .streamlit/secrets.toml
+# On Streamlit Cloud: entered via Secrets UI in settings
 # ============================================================
 ORDERS_URL = st.secrets["ORDERS_URL"]
 TARGETS_URL = st.secrets["TARGETS_URL"]
 
-# ============================================================
-# HELPER FUNCTION — FETCH CSV FROM URL
-# Uses requests library with browser headers to avoid
-# Google's HTTP 400 redirect block on direct pandas reads.
-# ============================================================
 
+# ============================================================
+# HELPER — FETCH CSV FROM URL
+# Uses browser headers to avoid Google's HTTP 400 block
+# ============================================================
 def fetch_csv(url):
-    # Mimic a browser request so Google allows the download
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     response = requests.get(url, headers=headers)
-
-    # Raise an error if the request failed
     response.raise_for_status()
-
-    # Convert the response text into a pandas DataFrame
     return pd.read_csv(StringIO(response.text))
 
 
 # ============================================================
 # LOAD ORDERS DATA
-# Fetches and cleans the raw orders sheet.
-# @st.cache_data caches for 10 minutes to keep dashboard fast.
+# Fetches, cleans, and enriches the raw orders sheet.
+# Cached for 10 minutes to keep dashboard fast.
 # ============================================================
-
 @st.cache_data(ttl=600)
 def load_orders():
 
     # --------------------------------------------------------
-    # FETCH RAW DATA FROM GOOGLE SHEETS
+    # FETCH RAW DATA
     # --------------------------------------------------------
     df = fetch_csv(ORDERS_URL)
 
     # --------------------------------------------------------
-    # CLEAN COLUMN NAMES
-    # Strips whitespace from headers to prevent key errors.
+    # DROP EMPTY UNNAMED COLUMNS
+    # Google Sheets exports extra blank columns — remove them.
+    # --------------------------------------------------------
+    df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+
+    # --------------------------------------------------------
+    # CLEAN ALL COLUMN NAMES
+    # Strip whitespace from headers to prevent key errors.
     # --------------------------------------------------------
     df.columns = df.columns.str.strip()
-    # Drop empty unnamed columns caused by extra blank columns in Google Sheet
-    df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+
+    # --------------------------------------------------------
+    # CLEAN TEXT COLUMNS — Strip whitespace and proper case
+    # Fixes duplicates like "olamide", "Olamide ", "OLAMIDE"
+    # all becoming "Olamide" so customer counts are accurate.
+    # --------------------------------------------------------
+    text_columns = [
+        "Customer Name",
+        "Rider Name",
+        "Order Area/Location",
+        "Station",
+        "Order Type",
+        "Day of the Week",
+        "Comments",
+        "Referral Code"
+    ]
+    for col in text_columns:
+        if col in df.columns:
+            # Strip leading/trailing spaces then apply title case
+            df[col] = df[col].astype(str).str.strip().str.title()
+            # Replace "Nan" strings that come from empty cells
+            df[col] = df[col].replace("Nan", None)
+
+    # --------------------------------------------------------
+    # SPECIFIC NAME STANDARDISATION
+    # Some rider names have known spelling variants.
+    # Map all variants to one consistent name.
+    # --------------------------------------------------------
+    rider_name_map = {
+        "Abdulahi": "Abdullahi",
+        "Abdulai": "Abdullahi",
+        "Abdulahi ": "Abdullahi",
+        "Mr. Bola": "Mr Bola",
+        "Mrbola": "Mr Bola",
+        "The Hero ": "The Hero",
+        "Tumise ": "Tumise",
+    }
+    if "Rider Name" in df.columns:
+        df["Rider Name"] = df["Rider Name"].replace(rider_name_map)
+
     # --------------------------------------------------------
     # CONVERT DATE COLUMN TO DATETIME
     # Enables month, week, year filtering throughout dashboard.
@@ -72,7 +105,6 @@ def load_orders():
 
     # --------------------------------------------------------
     # EXTRACT TIME COLUMNS FOR FILTERING
-    # Creates Month, Month Name, Year, Week columns from date.
     # --------------------------------------------------------
     df["Month"] = df["Date of Order"].dt.month
     df["Month Name"] = df["Date of Order"].dt.strftime("%B")
@@ -82,7 +114,7 @@ def load_orders():
     # --------------------------------------------------------
     # CLEAN NUMERIC COLUMNS
     # Removes commas from values like "1,300" and converts
-    # all financial columns to proper numbers.
+    # all financial and quantity columns to proper numbers.
     # --------------------------------------------------------
     numeric_columns = [
         "Cost Price (Per kg/liter)",
@@ -93,7 +125,6 @@ def load_orders():
         "Revenue (Total Customer Payment)",
         "COGS(naira)"
     ]
-
     for col in numeric_columns:
         if col in df.columns:
             df[col] = pd.to_numeric(
@@ -103,82 +134,99 @@ def load_orders():
 
     # --------------------------------------------------------
     # REMOVE ZERO OR NULL REVENUE ROWS
-    # Protects all KPIs from bad/incomplete data entries.
+    # Protects all KPIs from bad or incomplete data entries.
     # --------------------------------------------------------
     df = df[df["Revenue (Total Customer Payment)"] > 0]
 
     # --------------------------------------------------------
-    # CALCULATE PROFIT PER ORDER ROW
-    # Profit = Revenue minus Cost of Goods minus Delivery Cost
+    # CORRECT REVENUE MODEL
+    # Per GasFeel's DAX model:
+    #   GMV     = Total Customer Payment (what customer paid)
+    #   Revenue = GMV - COGS (what GasFeel keeps after product cost)
+    #   Profit  = Revenue - Delivery Cost (true profitability)
     # --------------------------------------------------------
-    df["Profit"] = (
-        df["Revenue (Total Customer Payment)"]
-        - df["COGS(naira)"]
-        - df["Delivery Cost (how much we paid to the Rider)"]
-    )
+    df["GMV"] = df["Revenue (Total Customer Payment)"]
+    df["Revenue"] = df["GMV"] - df["COGS(naira)"]
+    df["Profit"] = df["Revenue"] - df["Delivery Cost (how much we paid to the Rider)"]
 
     # --------------------------------------------------------
-    # CALCULATE DELIVERY DURATION IN MINUTES
-    # Measures time from fulfillment start to completion.
+    # DELIVERY TIME CALCULATIONS
+    # Three separate time metrics as per GasFeel's requirements:
+    #   1. Order to Completion — full customer journey time
+    #   2. Order to Fulfillment Start — initiation/response time
+    #   3. Fulfillment Start to Completion — actual delivery time
     # --------------------------------------------------------
-    df["Fulfillment Start Time"] = pd.to_datetime(
+    df["Order Time Parsed"] = pd.to_datetime(
+        df["Order Time"], format="%I:%M:%S %p", errors="coerce"
+    )
+    df["Fulfillment Start Parsed"] = pd.to_datetime(
         df["Fulfillment Start Time"], format="%I:%M:%S %p", errors="coerce"
     )
-    df["Order Completion Time"] = pd.to_datetime(
+    df["Completion Parsed"] = pd.to_datetime(
         df["Order Completion Time"], format="%I:%M:%S %p", errors="coerce"
     )
-    df["Delivery Duration (mins)"] = (
-        df["Order Completion Time"] - df["Fulfillment Start Time"]
+
+    # Full journey: Order placed to Order completed
+    df["Total Duration (mins)"] = (
+        df["Completion Parsed"] - df["Order Time Parsed"]
     ).dt.total_seconds() / 60
 
-    # --------------------------------------------------------
-    # FLAG ON-TIME DELIVERIES
-    # On-time = delivered within 25 minutes (GasFeel standard)
-    # --------------------------------------------------------
-    df["On Time"] = df["Delivery Duration (mins)"] <= 25
+    # Initiation time: Order placed to Fulfillment started
+    df["Initiation Duration (mins)"] = (
+        df["Fulfillment Start Parsed"] - df["Order Time Parsed"]
+    ).dt.total_seconds() / 60
+
+    # Delivery time: Fulfillment started to Completed
+    df["Delivery Duration (mins)"] = (
+        df["Completion Parsed"] - df["Fulfillment Start Parsed"]
+    ).dt.total_seconds() / 60
+
+    # Remove negative durations — data entry errors
+    df.loc[df["Total Duration (mins)"] < 0, "Total Duration (mins)"] = None
+    df.loc[df["Initiation Duration (mins)"] < 0, "Initiation Duration (mins)"] = None
+    df.loc[df["Delivery Duration (mins)"] < 0, "Delivery Duration (mins)"] = None
 
     # --------------------------------------------------------
-    # FLAG FREE VS PAID DELIVERY
+    # ON-TIME FLAG
+    # On-time = full journey (order to completion) <= 25 mins
+    # --------------------------------------------------------
+    df["On Time"] = df["Total Duration (mins)"] <= 25
+
+    # --------------------------------------------------------
+    # FREE VS PAID DELIVERY FLAG
     # Free = customer paid zero delivery fee
     # --------------------------------------------------------
     df["Delivery Type"] = df[
         "Delivery Fee (Amount we Collected from the customer)"
     ].apply(lambda x: "Free" if x == 0 else "Paid")
 
+    # --------------------------------------------------------
+    # ORDER HOUR — for hourly pattern chart
+    # --------------------------------------------------------
+    df["Order Hour"] = df["Order Time Parsed"].dt.hour
+
     return df
 
 
 # ============================================================
 # LOAD TARGETS DATA
-# Fetches the monthly/daily targets from second sheet tab.
+# Fetches the targets sheet and cleans numeric columns.
 # ============================================================
-
 @st.cache_data(ttl=600)
 def load_targets():
-
-    # Fetch targets sheet
     df = fetch_csv(TARGETS_URL)
-
-    # Clean column names
+    df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
     df.columns = df.columns.str.strip()
-
-    # Convert Period to datetime
     df["Period"] = pd.to_datetime(df["Period"], errors="coerce")
 
-    # Clean numeric target columns
     target_columns = [
-        "Target GMV",
-        "Target Revenue",
-        "Target Profit",
-        "Target Orders",
-        "Target Delivery Cost"
+        "Target GMV", "Target Revenue",
+        "Target Profit", "Target Orders", "Target Delivery Cost"
     ]
-
     for col in target_columns:
         if col in df.columns:
             df[col] = pd.to_numeric(
                 df[col].astype(str).str.replace(",", "", regex=False),
                 errors="coerce"
             )
-
     return df

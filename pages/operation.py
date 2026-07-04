@@ -40,8 +40,10 @@ def render_operation(df):
     total_riders = df["Rider Name"].nunique()
 
     # Average delivery duration in minutes (25 min = on-time threshold)
+    # Replace old delivery duration with three new metrics
+    avg_total_time = df["Total Duration (mins)"].mean()
+    avg_initiation_time = df["Initiation Duration (mins)"].mean()
     avg_delivery_time = df["Delivery Duration (mins)"].mean()
-    avg_delivery_time = avg_delivery_time if not pd.isna(avg_delivery_time) else 0
 
     # Total unique delivery locations
     total_locations = df["Order Area/Location"].nunique()
@@ -63,6 +65,8 @@ def render_operation(df):
         kpi_card("Total Riders", str(total_riders))
 
     with k2:
+        kpi_card("Avg Total Time", f"{avg_total_time:.1f} mins")
+        kpi_card("Avg Initiation Time", f"{avg_initiation_time:.1f} mins")
         kpi_card("Avg Delivery Time", f"{avg_delivery_time:.1f} mins")
 
     with k3:

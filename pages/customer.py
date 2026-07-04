@@ -303,3 +303,91 @@ def render_customer(df):
             height=260
         )
         st.plotly_chart(fig_size, use_container_width=True)
+    
+    # --------------------------------------------------------
+    # CHART — Customer Status by Month (Stacked Bar)
+    # Shows how Active, At Risk, and Churned counts change
+    # across each month — reveals retention trends over time.
+    # --------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>📅 Customer Status by Month</div>", unsafe_allow_html=True)
+
+    # Build monthly status breakdown
+    # For each month, classify each customer based on their
+    # last order date relative to the end of that month
+    monthly_status_rows = []
+
+    for (year, month), month_df in df.groupby(["Year", "Month"]):
+        month_end = pd.Timestamp(year=int(year), month=int(month), day=1) + pd.offsets.MonthEnd(0)
+        month_label = pd.Timestamp(year=int(year), month=int(month), day=1).strftime("%b %Y")
+
+        # Get last order date per customer up to end of this month
+        customer_last = df[
+            df["Date of Order"].dt.normalize() <= month_end
+        ].groupby("Customer Name")["Date of Order"].max().reset_index()
+        customer_last.columns = ["Customer Name", "Last Order"]
+        customer_last["Days Since"] = (month_end - customer_last["Last Order"]).dt.days
+
+        # Classify each customer for this month
+        active = (customer_last["Days Since"] <= 30).sum()
+        at_risk = ((customer_last["Days Since"] > 30) & (customer_last["Days Since"] <= 60)).sum()
+        churned = (customer_last["Days Since"] > 60).sum()
+
+        monthly_status_rows.append({
+            "Month": month_label,
+            "Year": year,
+            "Month Num": month,
+            "Active": active,
+            "At Risk": at_risk,
+            "Churned": churned
+        })
+
+    status_monthly_df = pd.DataFrame(monthly_status_rows).sort_values(["Year", "Month Num"])
+
+    fig_status_monthly = go.Figure()
+
+    # Active — dark blue bar
+    fig_status_monthly.add_trace(go.Bar(
+        name="Active",
+        x=status_monthly_df["Month"],
+        y=status_monthly_df["Active"],
+        marker_color="#003399",
+        text=status_monthly_df["Active"],
+        textposition="inside",
+        textfont=dict(color="white", size=11, family="Segoe UI")
+    ))
+
+    # At Risk — amber bar
+    fig_status_monthly.add_trace(go.Bar(
+        name="At Risk",
+        x=status_monthly_df["Month"],
+        y=status_monthly_df["At Risk"],
+        marker_color="#f0a500",
+        text=status_monthly_df["At Risk"],
+        textposition="inside",
+        textfont=dict(color="white", size=11, family="Segoe UI")
+    ))
+
+    # Churned — red bar
+    fig_status_monthly.add_trace(go.Bar(
+        name="Churned",
+        x=status_monthly_df["Month"],
+        y=status_monthly_df["Churned"],
+        marker_color="#cc0000",
+        text=status_monthly_df["Churned"],
+        textposition="inside",
+        textfont=dict(color="white", size=11, family="Segoe UI")
+    ))
+
+    fig_status_monthly.update_layout(
+        barmode="stack",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=10, r=10, t=20, b=10),
+        xaxis=dict(showgrid=False, title="", tickfont=dict(color="#333333")),
+        yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title="Customers", tickfont=dict(color="#333333")),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=320
+    )
+
+    st.plotly_chart(fig_status_monthly, use_container_width=True)

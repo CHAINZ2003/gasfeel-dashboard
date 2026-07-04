@@ -54,7 +54,7 @@ def render_revenue(df):
     total_gmv = df["Revenue (Total Customer Payment)"].sum()
 
     # Total Revenue (same as GMV in this context)
-    total_revenue = df["Revenue (Total Customer Payment)"].sum()
+    total_revenue = df["Revenue"].sum()
 
     # Total Delivery Cost paid to riders
     total_delivery_cost = df["Delivery Cost (how much we paid to the Rider)"].sum()
@@ -223,3 +223,64 @@ def render_revenue(df):
                 height=250
             )
             st.plotly_chart(fig_station, use_container_width=True)
+            # --------------------------------------------------------
+    # CHART — Product Revenue Contribution by Month
+    # Shows how each product type (Engine Oil, Gas LPG,
+    # Petrol PMS) contributes to total revenue each month.
+    # Reveals product mix trends over time.
+    # --------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>📅 Product Revenue by Month</div>", unsafe_allow_html=True)
+
+    # Group revenue by month and product type
+    product_monthly = df.groupby(
+        ["Year", "Month", "Month Name", "Order Type"]
+    )["Revenue"].sum().reset_index()
+
+    # Create proper month label for x-axis
+    product_monthly["Month Label"] = product_monthly.apply(
+        lambda r: pd.Timestamp(
+            year=int(r["Year"]), month=int(r["Month"]), day=1
+        ).strftime("%b %Y"), axis=1
+    )
+    product_monthly = product_monthly.sort_values(["Year", "Month"])
+
+    # Get unique product types
+    product_types = product_monthly["Order Type"].unique()
+
+    # Assign colours per product type
+    color_map = {
+        "Petrol (Pms)": "#003399",
+        "Gas (Lpg)": "#6699ff",
+        "Engine Oil": "#ccd9ff",
+    }
+
+    fig_product_monthly = go.Figure()
+
+    for product in product_types:
+        product_data = product_monthly[product_monthly["Order Type"] == product]
+        color = color_map.get(product, "#003399")
+
+        fig_product_monthly.add_trace(go.Bar(
+            name=product,
+            x=product_data["Month Label"],
+            y=product_data["Revenue"],
+            marker_color=color,
+            text=product_data["Revenue"].apply(format_naira),
+            textposition="inside",
+            textfont=dict(color="white", size=10, family="Segoe UI")
+        ))
+
+    fig_product_monthly.update_layout(
+        barmode="stack",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=10, r=10, t=20, b=10),
+        xaxis=dict(showgrid=False, title="", tickfont=dict(color="#333333")),
+        yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title="Revenue (₦)", tickfont=dict(color="#333333")),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=320
+    )
+
+    st.plotly_chart(fig_product_monthly, use_container_width=True)
+        
