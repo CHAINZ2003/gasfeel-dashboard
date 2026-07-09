@@ -158,6 +158,9 @@ def render_insights(df, targets):
     # RENDER INSIGHTS PAGE
     # ========================================================
 
+    # ========================================================
+    # HEADER
+    # ========================================================
     st.markdown(f"""
         <div style="
             background:linear-gradient(135deg,#001f6e,#003399);
@@ -173,6 +176,50 @@ def render_insights(df, targets):
             </p>
         </div>
     """, unsafe_allow_html=True)
+
+    # ========================================================
+    # CEO KPI SNAPSHOT — Top row of key numbers
+    # ========================================================
+    st.markdown("<div class='section-title'>⚡ Key Metrics Snapshot</div>", unsafe_allow_html=True)
+
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+
+    def snap_card(col, label, value, delta=None, color="#003399"):
+        with col:
+            st.markdown(f"""
+                <div style="background:white;border-radius:12px;padding:16px 14px;
+                            box-shadow:0 4px 12px rgba(0,51,153,0.10);
+                            border-top:4px solid {color};text-align:center;
+                            margin-bottom:16px;">
+                    <div style="color:#999;font-size:10px;font-weight:700;
+                                text-transform:uppercase;letter-spacing:1px;
+                                margin-bottom:6px;">{label}</div>
+                    <div style="color:#001f6e;font-size:20px;font-weight:800;
+                                line-height:1.1;">{value}</div>
+                    {"" if not delta else f"<div style='font-size:12px;font-weight:700;margin-top:4px;color:{color};'>{delta}</div>"}
+                </div>
+            """, unsafe_allow_html=True)
+
+    snap_card(k1, "YTD GMV", format_naira(ytd_gmv), f"{'▲' if ytd_vs_target>=0 else '▼'}{abs(ytd_vs_target):.1f}% vs target", "#003399" if ytd_vs_target>=0 else "#cc0000")
+    snap_card(k2, "YTD Revenue", format_naira(total_revenue), f"{revenue_margin:.1f}% margin", "#003399")
+    snap_card(k3, "Profit Margin", f"{profit_margin:.1f}%", format_naira(total_profit), "#00aa44" if profit_margin >= 15 else "#f0a500")
+    snap_card(k4, "Active Customers", str(active_count), f"{retention_rate:.1f}% retention", "#00aa44")
+    snap_card(k5, "At Risk", str(at_risk_count), f"{(at_risk_count/total_customers*100):.1f}% of base", "#f0a500")
+    snap_card(k6, "Churned", str(churned_count), f"{churn_rate:.1f}% churn rate", "#cc0000")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Second KPI row
+    k7, k8, k9, k10, k11, k12 = st.columns(6)
+
+    snap_card(k7, "Total Orders", f"{total_orders:,}", f"{format_naira(total_gmv/max(total_orders,1))} AOV", "#003399")
+    snap_card(k8, "Repeat Rate", f"{repeat_rate:.1f}%", "customers reordered", "#003399")
+    snap_card(k9, "On-Time Rate", f"{on_time_rate:.1f}%", "10 min threshold", "#00aa44" if on_time_rate>=70 else "#cc0000")
+    snap_card(k10, "Avg Delivery", f"{avg_total_time:.1f} mins", "order to completion", "#003399")
+    snap_card(k11, "Free Delivery", f"{free_pct:.1f}%", "of all orders", "#f0a500" if free_pct>50 else "#003399")
+    snap_card(k12, "Delivery Profit", format_naira(delivery_profit), "fee collected - cost", "#00aa44" if delivery_profit>=0 else "#cc0000")
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # --------------------------------------------------------
     # SECTION 1 — FINANCIAL PERFORMANCE
@@ -306,7 +353,7 @@ def render_insights(df, targets):
     ops_color = "green" if on_time_rate >= 70 else "amber" if on_time_rate >= 50 else "red"
     insight_card(
         "⏱️", "Delivery Performance",
-        f"On-time delivery rate (orders completed within 25 minutes) is <b>{on_time_rate:.1f}%</b>. "
+        f"On-time delivery rate (orders completed within 10 minutes) is <b>{on_time_rate:.1f}%</b>. "
         f"Average total order time from placement to completion is <b>{avg_total_time:.1f} minutes</b>. "
         f"{'Performance is strong — maintain current rider allocation.' if on_time_rate >= 70 else 'Performance needs improvement — review rider capacity and station proximity.'}",
         ops_color

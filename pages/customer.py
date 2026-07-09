@@ -121,31 +121,38 @@ def render_customer(df):
     row1_left, row1_mid, row1_right = st.columns(3)
 
     # ---- CHART 1: Top Customers by Revenue ----
+    # ---- CHART 1: Top Customers by Revenue + GMV labels ----
     with row1_left:
         st.markdown("<div class='section-title'>🏆 Top Customers by Revenue</div>", unsafe_allow_html=True)
 
-        # Sum revenue per customer, take top 8
-        top_customers = df.groupby("Customer Name")[
-            "Revenue (Total Customer Payment)"
-        ].sum().reset_index().sort_values(
-            "Revenue (Total Customer Payment)", ascending=True
-        ).tail(8)
+        # Aggregate both GMV and Revenue per customer
+        top_customers = df.groupby("Customer Name").agg(
+            Revenue=("Revenue", "sum"),
+            GMV=("GMV", "sum")
+        ).reset_index().sort_values("Revenue", ascending=True).tail(8)
 
-        fig_top = px.bar(
-            top_customers,
-            x="Revenue (Total Customer Payment)",
-            y="Customer Name",
-            orientation="h",
-            text=top_customers["Revenue (Total Customer Payment)"].apply(format_naira),
-            color_discrete_sequence=["#003399"]
+        # Custom label showing both GMV and Revenue
+        top_customers["Label"] = top_customers.apply(
+            lambda r: f"GMV: {format_naira(r['GMV'])} | Rev: {format_naira(r['Revenue'])}",
+            axis=1
         )
-        fig_top.update_traces(textposition="outside", textfont_size=9)
+
+        fig_top = go.Figure()
+        fig_top.add_trace(go.Bar(
+            x=top_customers["Revenue"],
+            y=top_customers["Customer Name"],
+            orientation="h",
+            text=top_customers["Label"],
+            textposition="outside",
+            textfont=dict(size=9, color="#333333"),
+            marker_color="#003399"
+        ))
         fig_top.update_layout(
             plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=10, r=30, t=20, b=10),
+            margin=dict(l=5, r=200, t=10, b=5),
             xaxis=dict(showgrid=True, gridcolor="#f0f0f0", title=""),
             yaxis=dict(showgrid=False, title=""),
-            height=280
+            height=300
         )
         st.plotly_chart(fig_top, use_container_width=True)
 
@@ -475,3 +482,194 @@ def render_customer(df):
             hide_index=True,
             height=400
         )
+
+# --------------------------------------------------------
+    # CHART — Churn Rate by Area
+    # For each area, classifies customers by their last order
+    # date and calculates active, at risk, and churned counts.
+    # Shows which areas have the worst retention problems.
+    # --------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-title'>📍 Customer Status by Area</div>",
+        unsafe_allow_html=True
+    )
+
+    # Get each customer's primary area (most frequent order area)
+    # and their last order date
+    customer_area = df.groupby("Customer Name").agg(
+        Last_Order=("Date of Order", "max"),
+        Primary_Area=("Order Area/Location", lambda x: x.value_counts().index[0])
+    ).reset_index()
+
+    customer_area["Days Since"] = (today - customer_area["Last_Order"]).dt.days
+    customer_area["Status"] = customer_area["Days Since"].apply(
+        lambda x: "Active" if x <= 30 else ("At Risk" if x <= 60 else "Churned")
+    )
+
+    # Group by area and count each status
+    area_status = customer_area.groupby(["Primary_Area", "Status"]).size().reset_index()
+    area_status.columns = ["Area", "Status", "Count"]
+
+    # Calculate total customers and churn rate per area
+    area_totals = customer_area.groupby("Primary_Area").size().reset_index()
+    area_totals.columns = ["Area", "Total"]
+
+    area_churned = customer_area[
+        customer_area["Status"] == "Churned"
+    ].groupby("Primary_Area").size().reset_index()
+    area_churned.columns = ["Area", "Churned"]
+
+    area_churn_rate = area_totals.merge(area_churned, on="Area", how="left")
+    area_churn_rate["Churned"] = area_churn_rate["Churned"].fillna(0)
+    area_churn_rate["Churn Rate %"] = (
+        area_churn_rate["Churned"] / area_churn_rate["Total"] * 100
+    ).round(1)
+    area_churn_rate = area_churn_rate.sort_values("Churn Rate %", ascending=False)
+
+    # Two charts side by side
+    col_churn1, col_churn2 = st.columns(2)
+
+    # ---- CHART LEFT: Stacked bar — customer status count per area ----
+    with col_churn1:
+        st.markdown(
+            "<div class='section-title'>👥 Customer Count by Status per Area</div>",
+            unsafe_allow_html=True
+        )
+
+        # Pivot for stacked bar
+        area_pivot = area_status.pivot(
+            index="Area", columns="Status", values="Count"
+        ).fillna(0).reset_index()
+
+        fig_area_stack = go.Figure()
+
+        if "Active" in area_pivot.columns:
+            fig_area_stack.add_trace(go.Bar(
+                name="Active",
+                x=area_pivot["Area"],
+                y=area_pivot["Active"],
+                marker_color="#003399",
+                text=area_pivot["Active"].astype(int),
+                textposition="inside",
+                textfont=dict(color="white", size=10)
+            ))
+
+        if "At Risk" in area_pivot.columns:
+            fig_area_stack.add_trace(go.Bar(
+                name="At Risk",
+                x=area_pivot["Area"],
+                y=area_pivot["At Risk"],
+                marker_color="#f0a500",
+                text=area_pivot["At Risk"].astype(int),
+                textposition="inside",
+                textfont=dict(color="white", size=10)
+            ))
+
+        if "Churned" in area_pivot.columns:
+            fig_area_stack.add_trace(go.Bar(
+                name="Churned",
+                x=area_pivot["Area"],
+                y=area_pivot["Churned"],
+                marker_color="#cc0000",
+                text=area_pivot["Churned"].astype(int),
+                textposition="inside",
+                textfont=dict(color="white", size=10)
+            ))
+
+        fig_area_stack.update_layout(
+            barmode="stack",
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=10, r=10, t=20, b=10),
+            xaxis=dict(
+                showgrid=False, title="",
+                tickangle=-45, tickfont=dict(color="#333333", size=9)
+            ),
+            yaxis=dict(
+                showgrid=True, gridcolor="#f0f0f0",
+                title="Customers", tickfont=dict(color="#333333")
+            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            height=350
+        )
+        st.plotly_chart(fig_area_stack, use_container_width=True)
+
+    # ---- CHART RIGHT: Churn rate % per area horizontal bar ----
+    with col_churn2:
+        st.markdown(
+            "<div class='section-title'>🔴 Churn Rate % by Area</div>",
+            unsafe_allow_html=True
+        )
+
+        # Colour bars — red if churn > 50%, amber if 30-50%, blue if under 30%
+        area_churn_rate["Color"] = area_churn_rate["Churn Rate %"].apply(
+            lambda x: "#cc0000" if x >= 50 else ("#f0a500" if x >= 30 else "#003399")
+        )
+
+        fig_churn = go.Figure()
+        fig_churn.add_trace(go.Bar(
+            x=area_churn_rate["Churn Rate %"],
+            y=area_churn_rate["Area"],
+            orientation="h",
+            marker_color=area_churn_rate["Color"],
+            text=area_churn_rate["Churn Rate %"].apply(lambda x: f"{x:.1f}%"),
+            textposition="outside",
+            textfont=dict(size=10, color="#333333")
+        ))
+
+        fig_churn.update_layout(
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=10, r=60, t=20, b=10),
+            xaxis=dict(
+                showgrid=True, gridcolor="#f0f0f0",
+                title="Churn Rate %", tickfont=dict(color="#333333"),
+                range=[0, max(area_churn_rate["Churn Rate %"]) * 1.2]
+            ),
+            yaxis=dict(showgrid=False, title="", tickfont=dict(color="#333333")),
+            height=350
+        )
+        st.plotly_chart(fig_churn, use_container_width=True)
+
+    # ---- TABLE: Full area churn breakdown ----
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-title'>📋 Area Churn Summary Table</div>",
+        unsafe_allow_html=True
+    )
+
+    # Build full summary table
+    area_active = customer_area[
+        customer_area["Status"] == "Active"
+    ].groupby("Primary_Area").size().reset_index()
+    area_active.columns = ["Area", "Active"]
+
+    area_risk = customer_area[
+        customer_area["Status"] == "At Risk"
+    ].groupby("Primary_Area").size().reset_index()
+    area_risk.columns = ["Area", "At Risk"]
+
+    area_summary = area_totals.merge(area_active, on="Area", how="left")
+    area_summary = area_summary.merge(area_risk, on="Area", how="left")
+    area_summary = area_summary.merge(area_churned, on="Area", how="left")
+    area_summary["Active"] = area_summary["Active"].fillna(0).astype(int)
+    area_summary["At Risk"] = area_summary["At Risk"].fillna(0).astype(int)
+    area_summary["Churned"] = area_summary["Churned"].fillna(0).astype(int)
+    area_summary["Churn Rate %"] = (
+        area_summary["Churned"] / area_summary["Total"] * 100
+    ).round(1).astype(str) + "%"
+    area_summary["Retention Rate %"] = (
+        area_summary["Active"] / area_summary["Total"] * 100
+    ).round(1).astype(str) + "%"
+    area_summary = area_summary.rename(columns={"Primary_Area": "Area", "Total": "Total Customers"})
+    area_summary = area_summary.sort_values("Churned", ascending=False)
+
+    st.dataframe(
+        area_summary[[
+            "Area", "Total Customers", "Active",
+            "At Risk", "Churned", "Churn Rate %", "Retention Rate %"
+        ]],
+        use_container_width=True,
+        hide_index=True
+    )

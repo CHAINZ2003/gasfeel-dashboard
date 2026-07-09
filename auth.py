@@ -37,7 +37,7 @@ def show_login():
 
         /* Full page blue background */
         .stApp {
-            background: linear-gradient(135deg, #001f6e 0%, #003399 60%, #0044cc 100%);
+            background: linear-gradient(135deg, #001f6e 0%, #003399 60%, #0044cc 100%) !important;
         }
 
         /* Hide default Streamlit elements */
@@ -45,71 +45,56 @@ def show_login():
         footer {visibility: hidden;}
         header {visibility: hidden;}
 
-        /* Login card container */
-        .login-card {
-            background: white;
-            border-radius: 20px;
-            padding: 48px 40px;
-            max-width: 420px;
-            margin: 60px auto;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            text-align: center;
-        }
-
-        .login-title {
-            color: #001f6e;
-            font-size: 26px;
-            font-weight: 800;
-            margin: 16px 0 4px 0;
-        }
-
-        .login-subtitle {
-            color: #888;
-            font-size: 14px;
-            margin-bottom: 32px;
-        }
-
-        .login-error {
-            background: #fff0f0;
-            color: #cc0000;
-            border: 1px solid #ffcccc;
-            border-radius: 8px;
-            padding: 10px 16px;
-            font-size: 13px;
-            font-weight: 600;
-            margin-bottom: 16px;
-        }
-
-        /* Style the input fields */
+        /* Input fields — dark text on white background */
         .stTextInput input {
-            border-radius: 8px !important;
-            border: 2px solid #e0e6ff !important;
-            padding: 12px 16px !important;
-            font-size: 14px !important;
+            background: white !important;
             color: #001f6e !important;
+            border: 2px solid #003399 !important;
+            border-radius: 8px !important;
+            padding: 12px 16px !important;
+            font-size: 15px !important;
+            font-weight: 500 !important;
+        }
+
+        .stTextInput input::placeholder {
+            color: #aaaaaa !important;
         }
 
         .stTextInput input:focus {
-            border-color: #003399 !important;
-            box-shadow: 0 0 0 3px rgba(0,51,153,0.1) !important;
+            border-color: #0044cc !important;
+            box-shadow: 0 0 0 3px rgba(0,51,153,0.2) !important;
+            outline: none !important;
+        }
+
+        /* Input label — white so visible on blue background */
+        .stTextInput label p {
+            color: white !important;
+            font-size: 13px !important;
+            font-weight: 600 !important;
         }
 
         /* Login button */
         .stButton button {
-            background: linear-gradient(135deg, #003399, #0044cc) !important;
-            color: white !important;
+            background: white !important;
+            color: #003399 !important;
             border: none !important;
             border-radius: 8px !important;
             padding: 12px 0 !important;
             font-size: 15px !important;
-            font-weight: 700 !important;
+            font-weight: 800 !important;
             width: 100% !important;
             margin-top: 8px !important;
-            cursor: pointer !important;
+            letter-spacing: 0.5px !important;
         }
 
         .stButton button:hover {
-            background: linear-gradient(135deg, #002277, #003399) !important;
+            background: #f0f4ff !important;
+            color: #001f6e !important;
+        }
+
+        /* Tab bar on login — hide it */
+        .stTabs {
+            display: none;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -118,13 +103,16 @@ def show_login():
     # LOGIN CARD HEADER
     # --------------------------------------------------------
     st.markdown("""
-        <div class='login-card'>
-            <div style='font-size:52px;'>⛽</div>
-            <div class='login-title'>GasFeel Analytics</div>
-            <div class='login-subtitle'>Sign in to access your dashboard</div>
+        <div style='text-align:center;padding:40px 0 20px 0;'>
+            <div style='font-size:64px;'>⛽</div>
+            <h1 style='color:white;font-size:28px;font-weight:800;margin:12px 0 4px 0;'>
+                GasFeel Analytics
+            </h1>
+            <p style='color:#a0c4ff;font-size:14px;margin:0;'>
+                Sign in to access your dashboard
+            </p>
         </div>
     """, unsafe_allow_html=True)
-
     # --------------------------------------------------------
     # LOGIN FORM
     # Centered column so it doesn't stretch full width

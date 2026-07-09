@@ -102,6 +102,8 @@ def load_orders():
     # Enables month, week, year filtering throughout dashboard.
     # --------------------------------------------------------
     df["Date of Order"] = pd.to_datetime(df["Date of Order"], errors="coerce")
+    # Drop rows where date could not be parsed — prevents NA errors in filters
+    df = df.dropna(subset=["Date of Order"])
 
     # --------------------------------------------------------
     # EXTRACT TIME COLUMNS FOR FILTERING
@@ -109,8 +111,8 @@ def load_orders():
     df["Month"] = df["Date of Order"].dt.month
     df["Month Name"] = df["Date of Order"].dt.strftime("%B")
     df["Year"] = df["Date of Order"].dt.year
-    df["Week"] = df["Date of Order"].dt.isocalendar().week.astype(int)
-
+    # Use nullable integer to handle NaT dates without crashing
+    df["Week"] = df["Date of Order"].dt.isocalendar().week.astype("Int64")
     # --------------------------------------------------------
     # CLEAN NUMERIC COLUMNS
     # Removes commas from values like "1,300" and converts
@@ -188,9 +190,9 @@ def load_orders():
 
     # --------------------------------------------------------
     # ON-TIME FLAG
-    # On-time = full journey (order to completion) <= 25 mins
+    # On-time = full journey (order to completion) <= 10 mins
     # --------------------------------------------------------
-    df["On Time"] = df["Total Duration (mins)"] <= 25
+    df["On Time"] = df["Total Duration (mins)"] <= 10
 
     # --------------------------------------------------------
     # FREE VS PAID DELIVERY FLAG

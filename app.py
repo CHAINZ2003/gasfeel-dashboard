@@ -263,6 +263,22 @@ st.markdown("""
         box-shadow: 0 2px 8px rgba(0,51,153,0.3);
     }
 
+    /* Tab text visible before selection */
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        color: #003399 !important;
+        font-weight: 600;
+        font-size: 13px;
+        border-radius: 8px;
+        padding: 8px 18px;
+        border: 2px solid #e0e6ff !important;
+    }
+
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e8eeff !important;
+        border-color: #003399 !important;
+    }
+            
     /* ============================================
        PLOTLY — Force dark text on all chart labels
     ============================================ */

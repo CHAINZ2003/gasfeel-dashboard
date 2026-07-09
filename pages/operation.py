@@ -39,7 +39,7 @@ def render_operation(df):
     # Total unique riders in the filtered dataset
     total_riders = df["Rider Name"].nunique()
 
-    # Average delivery duration in minutes (25 min = on-time threshold)
+    # Average delivery duration in minutes (10 min = on-time threshold)
     # Replace old delivery duration with three new metrics
     avg_total_time = df["Total Duration (mins)"].mean()
     avg_initiation_time = df["Initiation Duration (mins)"].mean()
@@ -51,7 +51,7 @@ def render_operation(df):
     # Total unique stations
     total_stations = df["Station"].nunique()
 
-    # On-time rate = orders delivered within 25 mins / total orders
+    # On-time rate = orders delivered within 10 mins / total orders
     on_time_count = df["On Time"].sum()
     total_orders = len(df)
     on_time_rate = (on_time_count / total_orders * 100) if total_orders > 0 else 0
@@ -145,9 +145,9 @@ def render_operation(df):
         rider_time["Avg Time"] = rider_time["Avg Time"].round(1)
         rider_time = rider_time.sort_values("Avg Time")
 
-        # Colour riders — green if at or below 25 mins, red if above
+        # Colour riders — green if at or below 10 mins, red if above
         rider_time["Color"] = rider_time["Avg Time"].apply(
-            lambda x: "#00aa44" if x <= 25 else "#cc0000"
+            lambda x: "#00aa44" if x <= 10 else "#cc0000"
         )
 
         fig_rider = go.Figure()
@@ -168,12 +168,12 @@ def render_operation(df):
                 y0=0, y1=row["Avg Time"],
                 line=dict(color=row["Color"], width=2)
             )
-        # 25-minute on-time threshold reference line
+        # 10-minute on-time threshold reference line
         fig_rider.add_hline(
-            y=25,
+            y=10,
             line_dash="dash",
             line_color="#f0a500",
-            annotation_text="25 min threshold",
+            annotation_text="10 min threshold",
             annotation_position="top right"
         )
         fig_rider.update_layout(
