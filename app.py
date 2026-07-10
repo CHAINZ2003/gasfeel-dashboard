@@ -383,12 +383,12 @@ st.markdown("""
 # NAVIGATION TABS
 # ============================================================
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Sales Tracker",
-    "💰 Revenue",
-    "📦 Product",
-    "👥 Customer",
-    "🚴 Operation",
-    "🧠 Insights"
+    "Sales Tracker",
+    "Revenue",
+    "Product",
+    "Customer",
+    "Operation",
+    "Insights"
 ])
 
 with tab1:
