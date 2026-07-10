@@ -1,16 +1,14 @@
 # ============================================================
 # APP.PY — GasFeel Dashboard Main Entry Point
-# This is the file Streamlit runs first.
-# Controls page config, styling, sidebar filters, and navigation.
 # ============================================================
 
 import streamlit as st
 import os
 from data_loader import load_orders, load_targets
 from auth import is_authenticated, show_login, logout
+
 # ============================================================
-# PAGE CONFIGURATION
-# Must be the very first Streamlit command in the file.
+# PAGE CONFIGURATION — Must be first Streamlit command
 # ============================================================
 st.set_page_config(
     page_title="GasFeel Dashboard",
@@ -21,8 +19,7 @@ st.set_page_config(
 
 # ============================================================
 # AUTHENTICATION GATE
-# If user is not logged in, show login page and stop here.
-# Nothing below this runs until the user is authenticated.
+# Nothing below runs until user is logged in.
 # ============================================================
 if not is_authenticated():
     show_login()
@@ -30,54 +27,35 @@ if not is_authenticated():
 
 # ============================================================
 # GLOBAL CSS STYLING
-# All visual styling lives here.
-# Edit only this section when changing colours or spacing.
+# Edit only this section to change colours, fonts, spacing.
 # ============================================================
 st.markdown("""
     <style>
 
-    /* ============================================
-       GLOBAL — Base background and font
-    ============================================ */
+    /* GLOBAL */
     .stApp {
         background-color: #f0f4ff;
         font-family: 'Segoe UI', sans-serif;
     }
 
-    /* ============================================
-       SIDEBAR — Deep blue gradient
-    ============================================ */
+    /* SIDEBAR */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #001f6e 0%, #003399 60%, #0044cc 100%);
         border-right: 1px solid rgba(255,255,255,0.1);
     }
-
-    /* Hide default Streamlit page navigation */
-    [data-testid="stSidebarNav"] {
-        display: none;
-    }
-
-    /* Sidebar text */
+    [data-testid="stSidebarNav"] { display: none; }
     [data-testid="stSidebar"] .stMarkdown p,
     [data-testid="stSidebar"] .stMarkdown span,
     [data-testid="stSidebar"] label,
     [data-testid="stSidebar"] h2,
-    [data-testid="stSidebar"] h3 {
-        color: white !important;
-    }
-
-    /* Sidebar checkbox label */
+    [data-testid="stSidebar"] h3 { color: white !important; }
     [data-testid="stSidebar"] .stCheckbox label p {
         color: white !important;
         font-size: 13px !important;
     }
-
-    /* Sidebar checkbox tick colour */
     [data-testid="stSidebar"] .stCheckbox input[type="checkbox"] {
         accent-color: #ffffff;
     }
-
-    /* Sidebar filter header */
     [data-testid="stSidebar"] strong {
         color: #a0c4ff !important;
         font-size: 10px !important;
@@ -86,15 +64,11 @@ st.markdown("""
         display: block;
         margin: 16px 0 8px 0;
     }
-
-    /* Sidebar checkbox row spacing */
     [data-testid="stSidebar"] .stCheckbox {
         margin-bottom: 4px;
         padding: 4px 0;
         border-bottom: 1px solid rgba(255,255,255,0.07);
     }
-
-    /* Sidebar buttons — Select All / Clear All */
     [data-testid="stSidebar"] .stButton button {
         background: rgba(255,255,255,0.15);
         color: white !important;
@@ -106,15 +80,12 @@ st.markdown("""
         font-weight: 600;
         margin-bottom: 8px;
     }
-
     [data-testid="stSidebar"] .stButton button:hover {
         background: rgba(255,255,255,0.25);
         border-color: white;
     }
 
-    /* ============================================
-       HEADER BAR
-    ============================================ */
+    /* HEADER */
     .gasfeel-header {
         background: linear-gradient(135deg, #001f6e 0%, #003399 100%);
         padding: 18px 28px;
@@ -125,7 +96,6 @@ st.markdown("""
         justify-content: space-between;
         box-shadow: 0 4px 15px rgba(0,51,153,0.3);
     }
-
     .gasfeel-header h1 {
         color: white !important;
         font-size: 22px;
@@ -133,7 +103,6 @@ st.markdown("""
         font-weight: 700;
         letter-spacing: 0.5px;
     }
-
     .gasfeel-header span {
         background: rgba(255,255,255,0.15);
         color: white !important;
@@ -143,10 +112,7 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* ============================================
-       ST.METRIC — Styled to match KPI card design
-       Used for all indicator cards (green/red arrows)
-    ============================================ */
+    /* ST.METRIC */
     [data-testid="stMetric"] {
         background: white;
         border-radius: 14px;
@@ -155,47 +121,27 @@ st.markdown("""
         border-left: 5px solid #003399;
         margin-bottom: 14px;
     }
-
-    [data-testid="stMetricLabel"] {
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricLabel"] p {
         color: #999999 !important;
         font-size: 11px !important;
         font-weight: 700 !important;
         text-transform: uppercase;
         letter-spacing: 1px;
     }
-
-    [data-testid="stMetricLabel"] p {
-        color: #999999 !important;
-        font-size: 11px !important;
-        font-weight: 700 !important;
-    }
-
-    [data-testid="stMetricValue"] {
-        color: #001f6e !important;
-        font-size: 26px !important;
-        font-weight: 800 !important;
-    }
-
+    [data-testid="stMetricValue"],
     [data-testid="stMetricValue"] div {
         color: #001f6e !important;
         font-size: 26px !important;
         font-weight: 800 !important;
     }
-
-    /* Delta text size and weight */
     [data-testid="stMetricDelta"] {
         font-size: 15px !important;
         font-weight: 700 !important;
     }
+    [data-testid="stMetricDelta"] svg { display: none !important; }
 
-    /* Hide the small triangle svg icon from delta */
-    [data-testid="stMetricDelta"] svg {
-        display: none !important;
-    }
-
-    /* ============================================
-       KPI CARDS — For plain value cards (no delta)
-    ============================================ */
+    /* KPI CARDS */
     .kpi-card {
         background: white;
         border-radius: 14px;
@@ -204,7 +150,6 @@ st.markdown("""
         border-left: 5px solid #003399;
         margin-bottom: 14px;
     }
-
     .kpi-label {
         color: #999999;
         font-size: 11px;
@@ -213,7 +158,6 @@ st.markdown("""
         letter-spacing: 1px;
         margin-bottom: 8px;
     }
-
     .kpi-value {
         color: #001f6e;
         font-size: 30px;
@@ -221,9 +165,7 @@ st.markdown("""
         line-height: 1.1;
     }
 
-    /* ============================================
-       SECTION TITLES — Above each chart or KPI group
-    ============================================ */
+    /* SECTION TITLES */
     .section-title {
         color: #003399;
         font-size: 13px;
@@ -235,57 +177,51 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
 
-/* ============================================
-       TABS — Clean active state with visible text
-    ============================================ */
-    .stTabs [data-baseweb="tab-list"] {
-        background-color: white;
-        border-radius: 12px;
-        padding: 5px;
-        gap: 4px;
-        box-shadow: 0 2px 8px rgba(0,51,153,0.08);
-        margin-bottom: 20px;
+    /* TABS — Single clean block, no duplicates */
+    div[data-testid="stTabs"] > div:first-child {
+        background-color: white !important;
+        border-radius: 12px !important;
+        padding: 5px !important;
+        gap: 4px !important;
+        box-shadow: 0 2px 8px rgba(0,51,153,0.08) !important;
+        margin-bottom: 20px !important;
     }
-
-    .stTabs [data-baseweb="tab"] {
+    div[data-testid="stTabs"] button {
         background-color: #f0f4ff !important;
+        border: 1px solid #ccd9ff !important;
+        border-radius: 8px !important;
         color: #003399 !important;
         font-weight: 600 !important;
         font-size: 13px !important;
-        border-radius: 8px !important;
         padding: 8px 18px !important;
-        border: 1px solid #ccd9ff !important;
         min-width: 80px !important;
     }
-
-    .stTabs [data-baseweb="tab"] p {
+    div[data-testid="stTabs"] button p,
+    div[data-testid="stTabs"] button div,
+    div[data-testid="stTabs"] button span {
         color: #003399 !important;
-        font-weight: 600 !important;
         font-size: 13px !important;
+        font-weight: 600 !important;
         visibility: visible !important;
         opacity: 1 !important;
+        display: block !important;
     }
-
-    .stTabs [aria-selected="true"] {
+    div[data-testid="stTabs"] button[aria-selected="true"] {
         background: linear-gradient(135deg, #003399, #0044cc) !important;
-        color: white !important;
-        box-shadow: 0 2px 8px rgba(0,51,153,0.3) !important;
         border-color: #003399 !important;
     }
-
-    .stTabs [aria-selected="true"] p {
+    div[data-testid="stTabs"] button[aria-selected="true"] p,
+    div[data-testid="stTabs"] button[aria-selected="true"] div,
+    div[data-testid="stTabs"] button[aria-selected="true"] span {
         color: white !important;
         font-weight: 700 !important;
     }
-
-    .stTabs [data-baseweb="tab"]:hover {
+    div[data-testid="stTabs"] button:hover {
         background-color: #e0e8ff !important;
         border-color: #003399 !important;
     }
-            
-    /* ============================================
-       PLOTLY — Force dark text on all chart labels
-    ============================================ */
+
+    /* PLOTLY */
     .js-plotly-plot .plotly .xtick text,
     .js-plotly-plot .plotly .ytick text,
     .js-plotly-plot .plotly .gtitle,
@@ -296,79 +232,32 @@ st.markdown("""
         color: #333333 !important;
     }
 
-    /* ============================================
-       MAIN CONTENT — Padding and max width
-    ============================================ */
+    /* MAIN CONTENT */
     .main .block-container {
         padding: 20px 28px !important;
         max-width: 100% !important;
     }
 
-    /* ============================================
-       HIDE DEFAULT STREAMLIT ELEMENTS
-    ============================================ */
+    /* HIDE STREAMLIT DEFAULT ELEMENTS */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-            
-    /* ============================================
-       TAB FIX — Force tab text visible on cloud
-       Uses button selector which cloud respects
-    ============================================ */
-    button[data-baseweb="tab"] {
-        background-color: #f0f4ff !important;
-        border: 1px solid #ccd9ff !important;
-        border-radius: 8px !important;
-        min-width: 80px !important;
-    }
-
-    button[data-baseweb="tab"] > div {
-        color: #003399 !important;
-        font-weight: 600 !important;
-        font-size: 13px !important;
-    }
-
-    button[data-baseweb="tab"] p {
-        color: #003399 !important;
-        font-weight: 600 !important;
-        font-size: 13px !important;
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-    }
-
-    button[aria-selected="true"][data-baseweb="tab"] {
-        background: linear-gradient(135deg, #003399, #0044cc) !important;
-        border-color: #003399 !important;
-    }
-
-    button[aria-selected="true"][data-baseweb="tab"] > div,
-    button[aria-selected="true"][data-baseweb="tab"] p {
-        color: white !important;
-        font-weight: 700 !important;
-    }
 
     </style>
 """, unsafe_allow_html=True)
 
-
 # ============================================================
-# LOAD DATA
-# Pulls from Google Sheets — cached for 10 minutes.
+# LOAD DATA — Cached for 10 minutes from Google Sheets
 # ============================================================
 df = load_orders()
 targets = load_targets()
-
 
 # ============================================================
 # SIDEBAR — GLOBAL FILTERS
 # ============================================================
 with st.sidebar:
 
-    # --------------------------------------------------------
     # LOGO
-    # Drop logo.png into assets folder to replace placeholder.
-    # --------------------------------------------------------
     logo_path = "assets/logo.png"
     if os.path.exists(logo_path):
         st.image(logo_path, width=150)
@@ -383,11 +272,8 @@ with st.sidebar:
 
     st.markdown("<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # MONTH FILTER — Checkboxes with Select All / Clear All
-    # --------------------------------------------------------
+    # MONTH FILTER
     st.markdown("**📅 Filter by Month**")
-
     month_names = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
@@ -412,11 +298,8 @@ with st.sidebar:
 
     st.markdown("<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # ORDER TYPE FILTER — Checkboxes with Select All / Clear All
-    # --------------------------------------------------------
+    # ORDER TYPE FILTER
     st.markdown("**🛢️ Filter by Order Type**")
-
     all_order_types = sorted(df["Order Type"].dropna().unique().tolist())
 
     col_c, col_d = st.columns(2)
@@ -436,30 +319,20 @@ with st.sidebar:
 
     st.markdown("<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
     # REFRESH INFO
-    # --------------------------------------------------------
     st.markdown("""
         <p style='color:#a0b8ff;font-size:11px;text-align:center;margin-top:8px;'>
         🔄 Data refreshes every 10 minutes<br>from Google Sheets
         </p>
     """, unsafe_allow_html=True)
 
-
-# --------------------------------------------------------
-    # LOGOUT BUTTON
-    # Clears session and returns user to login page.
-    # --------------------------------------------------------
+    # LOGOUT BUTTON — inside sidebar block
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚪 Sign Out", key="logout_btn"):
         logout()
 
-
-        
 # ============================================================
 # APPLY FILTERS
-# filtered_df is passed to every tab.
-# Falls back to full dataset if nothing selected.
 # ============================================================
 if selected_months and selected_order_types:
     filtered_df = df[
@@ -468,7 +341,6 @@ if selected_months and selected_order_types:
     ]
 else:
     filtered_df = df
-
 
 # ============================================================
 # DASHBOARD HEADER
@@ -479,7 +351,6 @@ st.markdown(f"""
         <span>Showing: {len(filtered_df):,} orders</span>
     </div>
 """, unsafe_allow_html=True)
-
 
 # ============================================================
 # NAVIGATION TABS
