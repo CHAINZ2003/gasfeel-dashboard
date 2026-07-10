@@ -310,6 +310,43 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
+            
+    /* ============================================
+       TAB FIX — Force tab text visible on cloud
+       Uses button selector which cloud respects
+    ============================================ */
+    button[data-baseweb="tab"] {
+        background-color: #f0f4ff !important;
+        border: 1px solid #ccd9ff !important;
+        border-radius: 8px !important;
+        min-width: 80px !important;
+    }
+
+    button[data-baseweb="tab"] > div {
+        color: #003399 !important;
+        font-weight: 600 !important;
+        font-size: 13px !important;
+    }
+
+    button[data-baseweb="tab"] p {
+        color: #003399 !important;
+        font-weight: 600 !important;
+        font-size: 13px !important;
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
+
+    button[aria-selected="true"][data-baseweb="tab"] {
+        background: linear-gradient(135deg, #003399, #0044cc) !important;
+        border-color: #003399 !important;
+    }
+
+    button[aria-selected="true"][data-baseweb="tab"] > div,
+    button[aria-selected="true"][data-baseweb="tab"] p {
+        color: white !important;
+        font-weight: 700 !important;
+    }
 
     </style>
 """, unsafe_allow_html=True)
