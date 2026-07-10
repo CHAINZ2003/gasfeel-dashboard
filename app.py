@@ -1,5 +1,5 @@
 # ============================================================
-# APP.PY — GasFeel Dashboard Main Entry Point
+# APP.PY — GasPay Dashboard Main Entry Point
 # ============================================================
 
 import streamlit as st
@@ -11,7 +11,7 @@ from auth import is_authenticated, show_login, logout
 # PAGE CONFIGURATION — Must be first Streamlit command
 # ============================================================
 st.set_page_config(
-    page_title="GasFeel Dashboard",
+    page_title="GasPay Dashboard",
     page_icon="⛽",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -103,7 +103,7 @@ st.markdown("""
     }
 
     /* ---- HEADER ---- */
-    .gasfeel-header {
+    .gaspay-header {
         background: linear-gradient(135deg, #001f6e 0%, #003399 100%);
         padding: 18px 28px;
         border-radius: 12px;
@@ -113,14 +113,14 @@ st.markdown("""
         justify-content: space-between;
         box-shadow: 0 4px 15px rgba(0,51,153,0.3);
     }
-    .gasfeel-header h1 {
+    .gaspay-header h1 {
         color: white !important;
         font-size: 22px;
         margin: 0;
         font-weight: 700;
         letter-spacing: 0.5px;
     }
-    .gasfeel-header span {
+    .gaspay-header span {
         background: rgba(255,255,255,0.15);
         color: white !important;
         font-size: 13px;
@@ -219,7 +219,8 @@ st.markdown("""
     div[data-testid="stRadio"] label:hover {
         background: #ccd9ff !important;
     }
-    div[data-testid="stRadio"] label > div > p {
+    div[data-testid="stRadio"] label p,
+    div[data-testid="stRadio"] label span {
         color: #003399 !important;
         font-weight: 700 !important;
         font-size: 13px !important;
@@ -230,7 +231,8 @@ st.markdown("""
     div[data-testid="stRadio"] label[data-selected="true"] {
         background: #003399 !important;
     }
-    div[data-testid="stRadio"] label[data-selected="true"] > div > p {
+    div[data-testid="stRadio"] label[data-selected="true"] p,
+    div[data-testid="stRadio"] label[data-selected="true"] span {
         color: white !important;
     }
 
@@ -278,7 +280,7 @@ with st.sidebar:
         st.markdown("""
             <div style='text-align:center; padding:10px 0 20px 0;'>
                 <span style='font-size:28px;'>⛽</span>
-                <h2 style='color:white;margin:0;font-size:20px;'>GasFeel</h2>
+                <h2 style='color:white;margin:0;font-size:20px;'>GasPay</h2>
                 <p style='color:#a0b8ff;font-size:12px;margin:0;'>Analytics Dashboard</p>
             </div>
         """, unsafe_allow_html=True)
@@ -368,8 +370,8 @@ else:
 # DASHBOARD HEADER
 # ============================================================
 st.markdown(f"""
-    <div class='gasfeel-header'>
-        <h1>⛽ GasFeel Analytics Dashboard</h1>
+    <div class='gaspay-header'>
+        <h1>⛽ GasPay Analytics Dashboard</h1>
         <span>Showing: {len(filtered_df):,} orders</span>
     </div>
 """, unsafe_allow_html=True)
