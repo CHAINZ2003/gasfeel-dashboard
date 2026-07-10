@@ -177,48 +177,34 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
 
-    /* TABS — Single clean block, no duplicates */
+/* TABS — Complete fix */
     div[data-testid="stTabs"] > div:first-child {
         background-color: white !important;
         border-radius: 12px !important;
         padding: 5px !important;
-        gap: 4px !important;
         box-shadow: 0 2px 8px rgba(0,51,153,0.08) !important;
         margin-bottom: 20px !important;
     }
     div[data-testid="stTabs"] button {
-        background-color: #f0f4ff !important;
-        border: 1px solid #ccd9ff !important;
+        background-color: #e8eeff !important;
+        border: 2px solid #003399 !important;
         border-radius: 8px !important;
-        color: #003399 !important;
-        font-weight: 600 !important;
-        font-size: 13px !important;
-        padding: 8px 18px !important;
-        min-width: 80px !important;
+        padding: 8px 14px !important;
+        min-width: 60px !important;
     }
-    div[data-testid="stTabs"] button p,
-    div[data-testid="stTabs"] button div,
-    div[data-testid="stTabs"] button span {
+    div[data-testid="stTabs"] button * {
         color: #003399 !important;
-        font-size: 13px !important;
-        font-weight: 600 !important;
+        font-size: 12px !important;
+        font-weight: 700 !important;
         visibility: visible !important;
         opacity: 1 !important;
-        display: block !important;
     }
     div[data-testid="stTabs"] button[aria-selected="true"] {
-        background: linear-gradient(135deg, #003399, #0044cc) !important;
-        border-color: #003399 !important;
+        background-color: #003399 !important;
+        border-color: #001f6e !important;
     }
-    div[data-testid="stTabs"] button[aria-selected="true"] p,
-    div[data-testid="stTabs"] button[aria-selected="true"] div,
-    div[data-testid="stTabs"] button[aria-selected="true"] span {
+    div[data-testid="stTabs"] button[aria-selected="true"] * {
         color: white !important;
-        font-weight: 700 !important;
-    }
-    div[data-testid="stTabs"] button:hover {
-        background-color: #e0e8ff !important;
-        border-color: #003399 !important;
     }
 
     /* PLOTLY */
@@ -352,6 +338,47 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
+# ============================================================
+# MOBILE SIDEBAR TOGGLE BUTTON
+# Shows a button on mobile to open the sidebar filter panel.
+# Hidden on desktop where sidebar is always visible.
+# ============================================================
+st.markdown("""
+    <style>
+    /* Show toggle button only on mobile */
+    .mobile-filter-btn {
+        display: none;
+    }
+    @media (max-width: 768px) {
+        .mobile-filter-btn {
+            display: block;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+        .mobile-filter-btn button {
+            background: #003399 !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 50px !important;
+            padding: 12px 20px !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            box-shadow: 0 4px 15px rgba(0,51,153,0.4) !important;
+            cursor: pointer !important;
+        }
+    }
+    </style>
+    <div class='mobile-filter-btn'>
+        <button onclick="
+            const sidebar = document.querySelector('[data-testid=stSidebar]');
+            if(sidebar) {
+                sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+            }
+        ">🔽 Filters</button>
+    </div>
+""", unsafe_allow_html=True)
 # ============================================================
 # NAVIGATION TABS
 # ============================================================
