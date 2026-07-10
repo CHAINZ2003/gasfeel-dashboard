@@ -26,29 +26,32 @@ if not is_authenticated():
     st.stop()
 
 # ============================================================
-# GLOBAL CSS STYLING
-# Edit only this section to change colours, fonts, spacing.
+# GLOBAL CSS — Edit only this section for visual changes
 # ============================================================
 st.markdown("""
     <style>
 
-    /* GLOBAL */
+    /* ---- GLOBAL ---- */
     .stApp {
         background-color: #f0f4ff;
         font-family: 'Segoe UI', sans-serif;
     }
 
-    /* SIDEBAR */
+    /* ---- SIDEBAR ---- */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #001f6e 0%, #003399 60%, #0044cc 100%);
         border-right: 1px solid rgba(255,255,255,0.1);
     }
-    [data-testid="stSidebarNav"] { display: none; }
+    [data-testid="stSidebarNav"] {
+        display: none;
+    }
     [data-testid="stSidebar"] .stMarkdown p,
     [data-testid="stSidebar"] .stMarkdown span,
     [data-testid="stSidebar"] label,
     [data-testid="stSidebar"] h2,
-    [data-testid="stSidebar"] h3 { color: white !important; }
+    [data-testid="stSidebar"] h3 {
+        color: white !important;
+    }
     [data-testid="stSidebar"] .stCheckbox label p {
         color: white !important;
         font-size: 13px !important;
@@ -85,7 +88,22 @@ st.markdown("""
         border-color: white;
     }
 
-    /* HEADER */
+    /* ---- MOBILE SIDEBAR ARROW ---- */
+    @media (max-width: 768px) {
+        [data-testid="collapsedControl"] {
+            display: flex !important;
+            visibility: visible !important;
+            background: #003399 !important;
+            color: white !important;
+            border-radius: 0 8px 8px 0 !important;
+            top: 50% !important;
+        }
+        .main .block-container {
+            padding: 10px 12px !important;
+        }
+    }
+
+    /* ---- HEADER ---- */
     .gasfeel-header {
         background: linear-gradient(135deg, #001f6e 0%, #003399 100%);
         padding: 18px 28px;
@@ -112,7 +130,7 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* ST.METRIC */
+    /* ---- ST.METRIC ---- */
     [data-testid="stMetric"] {
         background: white;
         border-radius: 14px;
@@ -139,9 +157,11 @@ st.markdown("""
         font-size: 15px !important;
         font-weight: 700 !important;
     }
-    [data-testid="stMetricDelta"] svg { display: none !important; }
+    [data-testid="stMetricDelta"] svg {
+        display: none !important;
+    }
 
-    /* KPI CARDS */
+    /* ---- KPI CARDS ---- */
     .kpi-card {
         background: white;
         border-radius: 14px;
@@ -165,7 +185,7 @@ st.markdown("""
         line-height: 1.1;
     }
 
-    /* SECTION TITLES */
+    /* ---- SECTION TITLES ---- */
     .section-title {
         color: #003399;
         font-size: 13px;
@@ -177,27 +197,32 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
 
-/* TABS — Complete fix */
+    /* ---- TABS ---- */
     div[data-testid="stTabs"] > div:first-child {
         background-color: white !important;
         border-radius: 12px !important;
         padding: 5px !important;
         box-shadow: 0 2px 8px rgba(0,51,153,0.08) !important;
         margin-bottom: 20px !important;
+        overflow-x: auto !important;
+        flex-wrap: nowrap !important;
+        white-space: nowrap !important;
     }
     div[data-testid="stTabs"] button {
         background-color: #e8eeff !important;
         border: 2px solid #003399 !important;
         border-radius: 8px !important;
-        padding: 8px 14px !important;
-        min-width: 60px !important;
+        padding: 8px 16px !important;
+        white-space: nowrap !important;
+        flex-shrink: 0 !important;
     }
     div[data-testid="stTabs"] button * {
         color: #003399 !important;
-        font-size: 12px !important;
+        font-size: 13px !important;
         font-weight: 700 !important;
         visibility: visible !important;
         opacity: 1 !important;
+        white-space: nowrap !important;
     }
     div[data-testid="stTabs"] button[aria-selected="true"] {
         background-color: #003399 !important;
@@ -207,7 +232,7 @@ st.markdown("""
         color: white !important;
     }
 
-    /* PLOTLY */
+    /* ---- PLOTLY ---- */
     .js-plotly-plot .plotly .xtick text,
     .js-plotly-plot .plotly .ytick text,
     .js-plotly-plot .plotly .gtitle,
@@ -218,13 +243,13 @@ st.markdown("""
         color: #333333 !important;
     }
 
-    /* MAIN CONTENT */
+    /* ---- MAIN CONTENT ---- */
     .main .block-container {
         padding: 20px 28px !important;
         max-width: 100% !important;
     }
 
-    /* HIDE STREAMLIT DEFAULT ELEMENTS */
+    /* ---- HIDE STREAMLIT DEFAULTS ---- */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -256,7 +281,10 @@ with st.sidebar:
             </div>
         """, unsafe_allow_html=True)
 
-    st.markdown("<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>", unsafe_allow_html=True)
+    st.markdown(
+        "<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>",
+        unsafe_allow_html=True
+    )
 
     # MONTH FILTER
     st.markdown("**📅 Filter by Month**")
@@ -282,7 +310,10 @@ with st.sidebar:
         if st.checkbox(month_names[m], value=True, key=f"month_{m}"):
             selected_months.append(m)
 
-    st.markdown("<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>", unsafe_allow_html=True)
+    st.markdown(
+        "<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>",
+        unsafe_allow_html=True
+    )
 
     # ORDER TYPE FILTER
     st.markdown("**🛢️ Filter by Order Type**")
@@ -303,7 +334,10 @@ with st.sidebar:
         if st.checkbox(ot, value=True, key=f"otype_{ot}"):
             selected_order_types.append(ot)
 
-    st.markdown("<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>", unsafe_allow_html=True)
+    st.markdown(
+        "<hr style='border-color:rgba(255,255,255,0.2);margin:16px 0;'>",
+        unsafe_allow_html=True
+    )
 
     # REFRESH INFO
     st.markdown("""
@@ -312,7 +346,7 @@ with st.sidebar:
         </p>
     """, unsafe_allow_html=True)
 
-    # LOGOUT BUTTON — inside sidebar block
+    # LOGOUT BUTTON
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚪 Sign Out", key="logout_btn"):
         logout()
@@ -339,51 +373,11 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# MOBILE SIDEBAR TOGGLE BUTTON
-# Shows a button on mobile to open the sidebar filter panel.
-# Hidden on desktop where sidebar is always visible.
-# ============================================================
-st.markdown("""
-    <style>
-    /* Show toggle button only on mobile */
-    .mobile-filter-btn {
-        display: none;
-    }
-    @media (max-width: 768px) {
-        .mobile-filter-btn {
-            display: block;
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 9999;
-        }
-        .mobile-filter-btn button {
-            background: #003399 !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 50px !important;
-            padding: 12px 20px !important;
-            font-size: 14px !important;
-            font-weight: 700 !important;
-            box-shadow: 0 4px 15px rgba(0,51,153,0.4) !important;
-            cursor: pointer !important;
-        }
-    }
-    </style>
-    <div class='mobile-filter-btn'>
-        <button onclick="
-            const sidebar = document.querySelector('[data-testid=stSidebar]');
-            if(sidebar) {
-                sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
-            }
-        ">🔽 Filters</button>
-    </div>
-""", unsafe_allow_html=True)
-# ============================================================
 # NAVIGATION TABS
+# Short names so all tabs fit on screen including mobile.
 # ============================================================
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "Sales Tracker",
+    "Sales",
     "Revenue",
     "Product",
     "Customer",
