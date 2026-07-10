@@ -88,7 +88,7 @@ st.markdown("""
         border-color: white;
     }
 
-    /* ---- MOBILE SIDEBAR ARROW ---- */
+    /* ---- MOBILE ---- */
     @media (max-width: 768px) {
         [data-testid="collapsedControl"] {
             display: flex !important;
@@ -96,7 +96,6 @@ st.markdown("""
             background: #003399 !important;
             color: white !important;
             border-radius: 0 8px 8px 0 !important;
-            top: 50% !important;
         }
         .main .block-container {
             padding: 10px 12px !important;
@@ -197,38 +196,41 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
 
-    /* ---- TABS ---- */
-    div[data-testid="stTabs"] > div:first-child {
-        background-color: white !important;
+    /* ---- RADIO NAVIGATION ---- */
+    div[data-testid="stRadio"] > div {
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+        background: white !important;
         border-radius: 12px !important;
-        padding: 5px !important;
+        padding: 8px !important;
         box-shadow: 0 2px 8px rgba(0,51,153,0.08) !important;
         margin-bottom: 20px !important;
-        overflow-x: auto !important;
-        flex-wrap: nowrap !important;
-        white-space: nowrap !important;
     }
-    div[data-testid="stTabs"] button {
-        background-color: #e8eeff !important;
+    div[data-testid="stRadio"] label {
+        background: #e8eeff !important;
         border: 2px solid #003399 !important;
         border-radius: 8px !important;
         padding: 8px 16px !important;
+        cursor: pointer !important;
         white-space: nowrap !important;
-        flex-shrink: 0 !important;
+        margin: 0 !important;
     }
-    div[data-testid="stTabs"] button * {
+    div[data-testid="stRadio"] label:hover {
+        background: #ccd9ff !important;
+    }
+    div[data-testid="stRadio"] label > div > p {
         color: #003399 !important;
-        font-size: 13px !important;
         font-weight: 700 !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        white-space: nowrap !important;
+        font-size: 13px !important;
     }
-    div[data-testid="stTabs"] button[aria-selected="true"] {
-        background-color: #003399 !important;
-        border-color: #001f6e !important;
+    div[data-testid="stRadio"] input[type="radio"] {
+        display: none !important;
     }
-    div[data-testid="stTabs"] button[aria-selected="true"] * {
+    div[data-testid="stRadio"] label[data-selected="true"] {
+        background: #003399 !important;
+    }
+    div[data-testid="stRadio"] label[data-selected="true"] > div > p {
         color: white !important;
     }
 
@@ -373,38 +375,46 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# NAVIGATION TABS
-# Short names so all tabs fit on screen including mobile.
+# NAVIGATION — Radio buttons work on all environments
+# including Streamlit Cloud where st.tabs text can disappear
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "Sales",
-    "Revenue",
-    "Product",
-    "Customer",
-    "Operation",
-    "Insights"
-])
+selected_tab = st.radio(
+    label="Navigation",
+    options=[
+        "📊 Sales",
+        "💰 Revenue",
+        "📦 Product",
+        "👥 Customer",
+        "🚴 Operation",
+        "🧠 Insights"
+    ],
+    horizontal=True,
+    label_visibility="collapsed"
+)
 
-with tab1:
+# ============================================================
+# RENDER SELECTED TAB
+# ============================================================
+if selected_tab == "📊 Sales":
     from pages.sales_tracker import render_sales_tracker
     render_sales_tracker(filtered_df, targets)
 
-with tab2:
+elif selected_tab == "💰 Revenue":
     from pages.revenue import render_revenue
     render_revenue(filtered_df)
 
-with tab3:
+elif selected_tab == "📦 Product":
     from pages.product import render_product
     render_product(filtered_df)
 
-with tab4:
+elif selected_tab == "👥 Customer":
     from pages.customer import render_customer
     render_customer(filtered_df)
 
-with tab5:
+elif selected_tab == "🚴 Operation":
     from pages.operation import render_operation
     render_operation(filtered_df)
 
-with tab6:
+elif selected_tab == "🧠 Insights":
     from pages.insights import render_insights
     render_insights(filtered_df, targets)
