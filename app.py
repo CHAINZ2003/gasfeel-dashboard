@@ -235,8 +235,8 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
 
-    /* ============================================
-       TABS — Clean active state
+/* ============================================
+       TABS — Clean active state with visible text
     ============================================ */
     .stTabs [data-baseweb="tab-list"] {
         background-color: white;
@@ -248,34 +248,38 @@ st.markdown("""
     }
 
     .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
+        background-color: #f0f4ff !important;
         color: #003399 !important;
-        font-weight: 600;
-        font-size: 13px;
-        border-radius: 8px;
-        padding: 8px 18px;
-        border: none;
+        font-weight: 600 !important;
+        font-size: 13px !important;
+        border-radius: 8px !important;
+        padding: 8px 18px !important;
+        border: 1px solid #ccd9ff !important;
+        min-width: 80px !important;
+    }
+
+    .stTabs [data-baseweb="tab"] p {
+        color: #003399 !important;
+        font-weight: 600 !important;
+        font-size: 13px !important;
+        visibility: visible !important;
+        opacity: 1 !important;
     }
 
     .stTabs [aria-selected="true"] {
         background: linear-gradient(135deg, #003399, #0044cc) !important;
         color: white !important;
-        box-shadow: 0 2px 8px rgba(0,51,153,0.3);
+        box-shadow: 0 2px 8px rgba(0,51,153,0.3) !important;
+        border-color: #003399 !important;
     }
 
-    /* Tab text visible before selection */
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        color: #003399 !important;
-        font-weight: 600;
-        font-size: 13px;
-        border-radius: 8px;
-        padding: 8px 18px;
-        border: 2px solid #e0e6ff !important;
+    .stTabs [aria-selected="true"] p {
+        color: white !important;
+        font-weight: 700 !important;
     }
 
     .stTabs [data-baseweb="tab"]:hover {
-        background-color: #e8eeff !important;
+        background-color: #e0e8ff !important;
         border-color: #003399 !important;
     }
             
