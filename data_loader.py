@@ -1,124 +1,119 @@
 # ============================================================
 # DATA LOADER — GasFeel Dashboard
-# This file handles all data fetching and cleaning from Google Sheets.
-# Uses requests library to bypass Google's redirect block.
-# All cleaning happens here so every tab receives clean data.
+# DUAL SOURCE with clean date cutoff:
+# Google Sheets → Jan 2026 to Jul 31 2026 (historical)
+# Supabase → Aug 1 2026 onwards (live app data)
+# No overlap. No duplicates. Clean merge.
 # ============================================================
 
 import pandas as pd
+import streamlit as st
 import requests
 from io import StringIO
-import streamlit as st
+from supabase import create_client
 
 
 # ============================================================
-# GOOGLE SHEET URLs — Loaded from Streamlit secrets
-# Locally stored in .streamlit/secrets.toml
-# On Streamlit Cloud: entered via Secrets UI in settings
+# CUTOFF DATE
+# Everything before this = Google Sheets
+# Everything from this date = Supabase
 # ============================================================
-ORDERS_URL = st.secrets["ORDERS_URL"]
+SUPABASE_CUTOFF = pd.Timestamp("2026-08-01")
+
+
+# ============================================================
+# GOOGLE SHEETS URLs
+# ============================================================
+ORDERS_URL  = st.secrets["ORDERS_URL"]
 TARGETS_URL = st.secrets["TARGETS_URL"]
 
 
 # ============================================================
-# HELPER — FETCH CSV FROM URL
-# Uses browser headers to avoid Google's HTTP 400 block
+# SUPABASE CLIENT
+# ============================================================
+@st.cache_resource
+def get_supabase():
+    return create_client(
+        st.secrets["SUPABASE_URL"],
+        st.secrets["SUPABASE_KEY"]
+    )
+
+
+# ============================================================
+# HELPER — FETCH CSV FROM GOOGLE SHEETS
 # ============================================================
 def fetch_csv(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     return pd.read_csv(StringIO(response.text))
 
 
 # ============================================================
-# LOAD ORDERS DATA
-# Fetches, cleans, and enriches the raw orders sheet.
-# Cached for 10 minutes to keep dashboard fast.
+# HELPER — FETCH ALL ROWS FROM SUPABASE TABLE
+# Loops pages since API returns max 1000 rows at once.
 # ============================================================
-@st.cache_data(ttl=600)
-def load_orders():
+def fetch_all_rows(table, select="*", eq_filter=None):
+    supabase  = get_supabase()
+    all_rows  = []
+    page_size = 1000
+    offset    = 0
 
-    # --------------------------------------------------------
-    # FETCH RAW DATA
-    # --------------------------------------------------------
-    df = fetch_csv(ORDERS_URL)
+    while True:
+        query = supabase.table(table).select(select)
+        if eq_filter:
+            for col, val in eq_filter.items():
+                query = query.eq(col, val)
+        result = query.range(offset, offset + page_size - 1).execute()
+        rows   = result.data
+        if not rows:
+            break
+        all_rows.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
 
-    # --------------------------------------------------------
-    # DROP EMPTY UNNAMED COLUMNS
-    # Google Sheets exports extra blank columns — remove them.
-    # --------------------------------------------------------
+    return pd.DataFrame(all_rows) if all_rows else pd.DataFrame()
+
+
+# ============================================================
+# HELPER — CLEAN AND ENRICH DATAFRAME
+# Applies cleaning, date parsing, and calculated columns
+# to any dataframe regardless of source.
+# ============================================================
+def clean_and_enrich(df):
+
+    # Clean column names
+    df.columns = df.columns.str.strip()
+
+    # Drop unnamed columns (Google Sheets artifact)
     df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
 
     # --------------------------------------------------------
-    # CLEAN ALL COLUMN NAMES
-    # Strip whitespace from headers to prevent key errors.
-    # --------------------------------------------------------
-    df.columns = df.columns.str.strip()
-
-    # --------------------------------------------------------
-    # CLEAN TEXT COLUMNS — Strip whitespace and proper case
-    # Fixes duplicates like "olamide", "Olamide ", "OLAMIDE"
-    # all becoming "Olamide" so customer counts are accurate.
-    # --------------------------------------------------------
-    text_columns = [
-        "Customer Name",
-        "Rider Name",
-        "Order Area/Location",
-        "Station",
-        "Order Type",
-        "Day of the Week",
-        "Comments",
-        "Referral Code"
-    ]
-    for col in text_columns:
-        if col in df.columns:
-            # Strip leading/trailing spaces then apply title case
-            df[col] = df[col].astype(str).str.strip().str.title()
-            # Replace "Nan" strings that come from empty cells
-            df[col] = df[col].replace("Nan", None)
-
-    # --------------------------------------------------------
-    # SPECIFIC NAME STANDARDISATION
-    # Some rider names have known spelling variants.
-    # Map all variants to one consistent name.
-    # --------------------------------------------------------
-    rider_name_map = {
-        "Abdulahi": "Abdullahi",
-        "Abdulai": "Abdullahi",
-        "Abdulahi ": "Abdullahi",
-        "Mr. Bola": "Mr Bola",
-        "Mrbola": "Mr Bola",
-        "The Hero ": "The Hero",
-        "Tumise ": "Tumise",
-    }
-    if "Rider Name" in df.columns:
-        df["Rider Name"] = df["Rider Name"].replace(rider_name_map)
-
-    # --------------------------------------------------------
-    # CONVERT DATE COLUMN TO DATETIME
-    # Enables month, week, year filtering throughout dashboard.
+    # CONVERT DATE OF ORDER
+    # Both sources use "Date of Order" column after renaming.
     # --------------------------------------------------------
     df["Date of Order"] = pd.to_datetime(df["Date of Order"], errors="coerce")
-    # Drop rows where date could not be parsed — prevents NA errors in filters
     df = df.dropna(subset=["Date of Order"])
 
-    # --------------------------------------------------------
-    # EXTRACT TIME COLUMNS FOR FILTERING
-    # --------------------------------------------------------
-    df["Month"] = df["Date of Order"].dt.month
+    # Extract time period columns for filters
+    df["Month"]      = df["Date of Order"].dt.month
     df["Month Name"] = df["Date of Order"].dt.strftime("%B")
-    df["Year"] = df["Date of Order"].dt.year
-    # Use nullable integer to handle NaT dates without crashing
-    df["Week"] = df["Date of Order"].dt.isocalendar().week.astype("Int64")
-    # --------------------------------------------------------
-    # CLEAN NUMERIC COLUMNS
-    # Removes commas from values like "1,300" and converts
-    # all financial and quantity columns to proper numbers.
-    # --------------------------------------------------------
-    numeric_columns = [
+    df["Year"]       = df["Date of Order"].dt.year
+    df["Week"]       = df["Date of Order"].dt.isocalendar().week.astype("Int64")
+
+    # Clean text columns — proper case, strip whitespace
+    text_cols = [
+        "Customer Name", "Rider Name",
+        "Order Area/Location", "Station", "Order Type"
+    ]
+    for col in text_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.title()
+            df[col] = df[col].replace("Nan", None)
+
+    # Clean numeric columns — remove commas
+    numeric_cols = [
         "Cost Price (Per kg/liter)",
         "Selling Price (Per kg/Liter)",
         "Litre/Kg Sold",
@@ -127,92 +122,316 @@ def load_orders():
         "Revenue (Total Customer Payment)",
         "COGS(naira)"
     ]
-    for col in numeric_columns:
+    for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(
                 df[col].astype(str).str.replace(",", "", regex=False),
                 errors="coerce"
             )
 
-    # --------------------------------------------------------
-    # REMOVE ZERO OR NULL REVENUE ROWS
-    # Protects all KPIs from bad or incomplete data entries.
-    # --------------------------------------------------------
+    # Remove zero or null revenue rows
     df = df[df["Revenue (Total Customer Payment)"] > 0]
 
     # --------------------------------------------------------
-    # CORRECT REVENUE MODEL
-    # Per GasFeel's DAX model:
-    #   GMV     = Total Customer Payment (what customer paid)
-    #   Revenue = GMV - COGS (what GasFeel keeps after product cost)
-    #   Profit  = Revenue - Delivery Cost (true profitability)
+    # REVENUE MODEL
+    # GMV     = Total Customer Payment
+    # Revenue = GMV - COGS
+    # Profit  = Revenue - Delivery Cost
     # --------------------------------------------------------
     df["GMV"] = df["Revenue (Total Customer Payment)"]
-    df["Revenue"] = df["GMV"] - df["COGS(naira)"]
-    df["Profit"] = df["Revenue"] - df["Delivery Cost (how much we paid to the Rider)"]
+
+    if "Revenue" not in df.columns or df["Revenue"].isna().all():
+        df["Revenue"] = df["GMV"] - df["COGS(naira)"].fillna(0)
+
+    if "Profit" not in df.columns or df["Profit"].isna().all():
+        df["Profit"] = (
+            df["Revenue"] -
+            df["Delivery Cost (how much we paid to the Rider)"].fillna(0)
+        )
 
     # --------------------------------------------------------
     # DELIVERY TIME CALCULATIONS
-    # Three separate time metrics as per GasFeel's requirements:
-    #   1. Order to Completion — full customer journey time
-    #   2. Order to Fulfillment Start — initiation/response time
-    #   3. Fulfillment Start to Completion — actual delivery time
+    # Midnight crossover fix: add 1440 mins if result negative.
     # --------------------------------------------------------
-    df["Order Time Parsed"] = pd.to_datetime(
-        df["Order Time"], format="%I:%M:%S %p", errors="coerce"
+    def parse_time(col):
+        if col in df.columns:
+            return pd.to_datetime(
+                df[col].astype(str).str.strip(),
+                format="%I:%M:%S %p", errors="coerce"
+            )
+        return pd.Series([pd.NaT] * len(df), index=df.index)
+
+    order_time  = parse_time("Order Time")
+    start_time  = parse_time("Fulfillment Start Time")
+    finish_time = parse_time("Order Completion Time")
+
+    def safe_dur(start, end):
+        dur = (end - start).dt.total_seconds() / 60
+        dur = dur.where(dur >= 0, dur + 1440)
+        dur = dur.where(dur <= 1440, None)
+        return dur
+
+    df["Total Duration (mins)"]      = safe_dur(order_time, finish_time)
+    df["Initiation Duration (mins)"] = safe_dur(order_time, start_time)
+
+    if "Delivery Duration (mins)" not in df.columns or df["Delivery Duration (mins)"].isna().all():
+        df["Delivery Duration (mins)"] = safe_dur(start_time, finish_time)
+
+    # On-time flag — 10 minute threshold
+    df["On Time"] = df["Delivery Duration (mins)"].apply(
+        lambda x: x <= 10 if pd.notna(x) else None
     )
-    df["Fulfillment Start Parsed"] = pd.to_datetime(
-        df["Fulfillment Start Time"], format="%I:%M:%S %p", errors="coerce"
-    )
-    df["Completion Parsed"] = pd.to_datetime(
-        df["Order Completion Time"], format="%I:%M:%S %p", errors="coerce"
-    )
 
-    # Full journey: Order placed to Order completed
-    df["Total Duration (mins)"] = (
-        df["Completion Parsed"] - df["Order Time Parsed"]
-    ).dt.total_seconds() / 60
-
-    # Initiation time: Order placed to Fulfillment started
-    df["Initiation Duration (mins)"] = (
-        df["Fulfillment Start Parsed"] - df["Order Time Parsed"]
-    ).dt.total_seconds() / 60
-
-    # Delivery time: Fulfillment started to Completed
-    df["Delivery Duration (mins)"] = (
-        df["Completion Parsed"] - df["Fulfillment Start Parsed"]
-    ).dt.total_seconds() / 60
-
-    # Remove negative durations — data entry errors
-    df.loc[df["Total Duration (mins)"] < 0, "Total Duration (mins)"] = None
-    df.loc[df["Initiation Duration (mins)"] < 0, "Initiation Duration (mins)"] = None
-    df.loc[df["Delivery Duration (mins)"] < 0, "Delivery Duration (mins)"] = None
-
-    # --------------------------------------------------------
-    # ON-TIME FLAG
-    # On-time = full journey (order to completion) <= 10 mins
-    # --------------------------------------------------------
-    df["On Time"] = df["Total Duration (mins)"] <= 10
-
-    # --------------------------------------------------------
-    # FREE VS PAID DELIVERY FLAG
-    # Free = customer paid zero delivery fee
-    # --------------------------------------------------------
+    # Free vs Paid delivery
     df["Delivery Type"] = df[
         "Delivery Fee (Amount we Collected from the customer)"
-    ].apply(lambda x: "Free" if x == 0 else "Paid")
+    ].apply(lambda x: "Free" if pd.notna(x) and x == 0 else "Paid")
 
-    # --------------------------------------------------------
-    # ORDER HOUR — for hourly pattern chart
-    # --------------------------------------------------------
-    df["Order Hour"] = df["Order Time Parsed"].dt.hour
+    # Order hour for hourly pattern chart
+    df["Order Hour"] = order_time.dt.hour
 
     return df
 
 
 # ============================================================
-# LOAD TARGETS DATA
-# Fetches the targets sheet and cleans numeric columns.
+# LOAD GOOGLE SHEETS ORDERS
+# Historical data — Jan 2026 to Jul 31 2026 only.
+# Filtered by Date of Order column (not Timestamp).
+# ============================================================
+def load_sheets_orders():
+    try:
+        df = fetch_csv(ORDERS_URL)
+        df.columns = df.columns.str.strip()
+        df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+
+        # Convert Date of Order first so we can filter
+        df["Date of Order"] = pd.to_datetime(df["Date of Order"], errors="coerce")
+        df = df.dropna(subset=["Date of Order"])
+
+        # Keep only orders BEFORE the cutoff date
+        df = df[df["Date of Order"] < SUPABASE_CUTOFF]
+
+        df["Data Source"] = "Google Sheets"
+        df = clean_and_enrich(df)
+        return df
+
+    except Exception as e:
+        st.warning(f"Google Sheets load failed: {e}")
+        return pd.DataFrame()
+
+
+# ============================================================
+# LOAD SUPABASE ORDERS
+# Live data — Aug 1 2026 onwards only.
+# Status = 'closed' confirmed from database test.
+# ============================================================
+def load_supabase_orders():
+    try:
+        # Fetch closed orders from Aug 1 onwards
+        orders_df = fetch_all_rows(
+            "orders",
+            select="id,created_at,customer_whatsapp,product,"
+                   "rider_id,petrol_station_id,gas_station_id,"
+                   "zone,rider_payout,delivery_fee,grand_total,"
+                   "status,fulfillment_start,completion_time,"
+                   "measured_delivery_time,is_member_free_delivery,"
+                   "agent_order_id",
+            eq_filter={"status": "closed"}
+        )
+
+        if orders_df.empty:
+            return pd.DataFrame()
+
+        # Convert created_at to date and filter from Aug 1 onwards
+        orders_df["created_at_dt"] = pd.to_datetime(
+            orders_df["created_at"], errors="coerce", utc=True
+        ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None)
+
+        orders_df = orders_df[
+            orders_df["created_at_dt"] >= SUPABASE_CUTOFF
+        ]
+
+        if orders_df.empty:
+            return pd.DataFrame()
+
+        # Fetch supporting tables
+        items_df = fetch_all_rows(
+            "order_items",
+            select="order_id,quantity,cost_price,selling_price,cogs,gmv,revenue,profit"
+        )
+        customers_df = fetch_all_rows(
+            "customers",
+            select="whatsapp_number,name"
+        )
+        riders_df = fetch_all_rows(
+            "riders",
+            select="id,name"
+        )
+        stations_df = fetch_all_rows(
+            "stations",
+            select="id,station_name"
+        )
+
+        # Merge supporting tables
+        if not items_df.empty:
+            orders_df = orders_df.merge(
+                items_df,
+                left_on="id", right_on="order_id",
+                how="left"
+            )
+
+        if not customers_df.empty:
+            orders_df = orders_df.merge(
+                customers_df,
+                left_on="customer_whatsapp", right_on="whatsapp_number",
+                how="left"
+            )
+
+        if not riders_df.empty:
+            orders_df = orders_df.merge(
+                riders_df.rename(columns={"id": "r_id", "name": "rider_name"}),
+                left_on="rider_id", right_on="r_id",
+                how="left"
+            )
+
+        if not stations_df.empty:
+            orders_df = orders_df.merge(
+                stations_df.rename(columns={"id": "ps_id", "station_name": "petrol_stn"}),
+                left_on="petrol_station_id", right_on="ps_id",
+                how="left"
+            )
+            orders_df = orders_df.merge(
+                stations_df.rename(columns={"id": "gs_id", "station_name": "gas_stn"}),
+                left_on="gas_station_id", right_on="gs_id",
+                how="left"
+            )
+
+        # Map product names to match Google Sheets format
+        product_map = {
+            "gas":    "Gas (LPG)",
+            "petrol": "Petrol (PMS)",
+            "oil":    "Engine Oil"
+        }
+        orders_df["product"] = orders_df["product"].str.lower().map(
+            product_map
+        ).fillna(orders_df["product"])
+
+        # Clean zone names — strip suffixes like "(before T-junction)"
+        orders_df["zone"] = orders_df["zone"].fillna("Unknown").str.split(
+            r'\(', expand=True, regex=True
+        )[0].str.strip()
+
+        # Rename to dashboard standard column names
+        orders_df["Order ID"] = orders_df["agent_order_id"].fillna(
+            orders_df["id"].astype(str)
+        )
+        orders_df["Date of Order"] = orders_df["created_at_dt"].dt.strftime("%Y-%m-%d")
+        orders_df["Day of the Week"] = orders_df["created_at_dt"].dt.strftime("%a")
+        orders_df["Order Type"]      = orders_df["product"]
+        orders_df["Litre/Kg Sold"]   = pd.to_numeric(orders_df.get("quantity", 0), errors="coerce").fillna(0)
+        orders_df["Cost Price (Per kg/liter)"]    = pd.to_numeric(orders_df.get("cost_price", 0), errors="coerce").fillna(0)
+        orders_df["Selling Price (Per kg/Liter)"] = pd.to_numeric(orders_df.get("selling_price", 0), errors="coerce").fillna(0)
+        orders_df["Customer Name"]       = orders_df.get("name", orders_df["customer_whatsapp"]).fillna(orders_df["customer_whatsapp"])
+        orders_df["Customer Phone"]      = orders_df["customer_whatsapp"]
+        orders_df["Order Area/Location"] = orders_df["zone"]
+        orders_df["Rider Name"]          = orders_df.get("rider_name", pd.Series("Unknown", index=orders_df.index)).fillna("Unknown")
+        orders_df["Station"]             = orders_df.get("petrol_stn", pd.Series("Unknown", index=orders_df.index)).fillna(
+            orders_df.get("gas_stn", pd.Series("Unknown", index=orders_df.index))
+        ).fillna("Unknown")
+
+        # Time columns — convert UTC timestamps to Lagos time
+        orders_df["Order Time"] = orders_df["created_at_dt"].dt.strftime("%I:%M:%S %p")
+        orders_df["Fulfillment Start Time"] = pd.to_datetime(
+            orders_df["fulfillment_start"], errors="coerce", utc=True
+        ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None).dt.strftime("%I:%M:%S %p")
+        orders_df["Order Completion Time"] = pd.to_datetime(
+            orders_df["completion_time"], errors="coerce", utc=True
+        ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None).dt.strftime("%I:%M:%S %p")
+
+        # Financial columns
+        orders_df["Delivery Cost (how much we paid to the Rider)"] = pd.to_numeric(
+            orders_df.get("rider_payout", 0), errors="coerce"
+        ).fillna(0)
+        orders_df["Delivery Fee (Amount we Collected from the customer)"] = pd.to_numeric(
+            orders_df.get("delivery_fee", 0), errors="coerce"
+        ).fillna(0)
+
+        gmv_series = pd.to_numeric(orders_df.get("gmv", orders_df["grand_total"]), errors="coerce")
+        grand_series = pd.to_numeric(orders_df["grand_total"], errors="coerce")
+        orders_df["Revenue (Total Customer Payment)"] = gmv_series.fillna(grand_series)
+
+        orders_df["COGS(naira)"] = pd.to_numeric(
+            orders_df.get("cogs", pd.Series(0, index=orders_df.index)),
+            errors="coerce"
+        ).fillna(0)
+        orders_df["Revenue"] = pd.to_numeric(
+            orders_df.get("revenue", pd.Series(0, index=orders_df.index)),
+            errors="coerce"
+        ).fillna(0)
+        orders_df["Profit"] = pd.to_numeric(
+            orders_df.get("profit", pd.Series(0, index=orders_df.index)),
+            errors="coerce"
+        ).fillna(0)
+        orders_df["Delivery Duration (mins)"] = pd.to_numeric(
+            orders_df.get("measured_delivery_time"),
+            errors="coerce"
+        )
+        orders_df["Data Source"] = "Supabase"
+
+        # Keep only standard columns
+        keep_cols = [
+            "Order ID", "Date of Order", "Day of the Week",
+            "Order Type", "Litre/Kg Sold",
+            "Cost Price (Per kg/liter)", "Selling Price (Per kg/Liter)",
+            "Customer Name", "Customer Phone", "Order Area/Location",
+            "Rider Name", "Station",
+            "Order Time", "Fulfillment Start Time", "Order Completion Time",
+            "Delivery Cost (how much we paid to the Rider)",
+            "Delivery Fee (Amount we Collected from the customer)",
+            "Revenue (Total Customer Payment)", "COGS(naira)",
+            "Revenue", "Profit",
+            "Delivery Duration (mins)", "Data Source"
+        ]
+        orders_df = orders_df[[c for c in keep_cols if c in orders_df.columns]]
+        orders_df = clean_and_enrich(orders_df)
+        return orders_df
+
+    except Exception as e:
+        st.warning(f"Supabase load failed: {e}")
+        return pd.DataFrame()
+
+
+# ============================================================
+# LOAD ORDERS — MERGED WITH CLEAN DATE CUTOFF
+# Google Sheets: Jan 2026 to Jul 31 2026
+# Supabase: Aug 1 2026 onwards
+# No overlap possible. No deduplication needed.
+# ============================================================
+@st.cache_data(ttl=600)
+def load_orders():
+
+    sheets_df   = load_sheets_orders()
+    supabase_df = load_supabase_orders()
+
+    if sheets_df.empty and supabase_df.empty:
+        st.error("No data loaded from either source.")
+        return pd.DataFrame()
+
+    if sheets_df.empty:
+        return supabase_df
+
+    if supabase_df.empty:
+        return sheets_df
+
+    # Clean merge — no overlap possible due to date cutoff
+    merged = pd.concat([sheets_df, supabase_df], ignore_index=True)
+    merged = merged.sort_values("Date of Order").reset_index(drop=True)
+    return merged
+
+
+# ============================================================
+# LOAD TARGETS — Always from Google Sheets
+# Supabase ops_targets is empty so Sheets is permanent source.
 # ============================================================
 @st.cache_data(ttl=600)
 def load_targets():
@@ -220,12 +439,8 @@ def load_targets():
     df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
     df.columns = df.columns.str.strip()
     df["Period"] = pd.to_datetime(df["Period"], errors="coerce")
-
-    target_columns = [
-        "Target GMV", "Target Revenue",
-        "Target Profit", "Target Orders", "Target Delivery Cost"
-    ]
-    for col in target_columns:
+    for col in ["Target GMV", "Target Revenue", "Target Profit",
+                "Target Orders", "Target Delivery Cost"]:
         if col in df.columns:
             df[col] = pd.to_numeric(
                 df[col].astype(str).str.replace(",", "", regex=False),

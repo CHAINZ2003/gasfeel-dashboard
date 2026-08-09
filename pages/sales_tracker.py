@@ -83,7 +83,7 @@ def render_sales_tracker(df, targets):
     # --------------------------------------------------------
     # STEP 2 — FILTER DATA INTO TIME PERIODS
     # --------------------------------------------------------
-    df_y   = df[df["Date of Order"].dt.normalize() == yesterday]
+    df_y   = df[df["Date of Order"].dt.normalize() == today]
     df_wtd = df[df["Date of Order"].dt.normalize() >= week_start]
     df_mtd = df[df["Date of Order"].dt.normalize() >= month_start]
     df_ytd = df[df["Date of Order"].dt.normalize() >= year_start]
@@ -130,6 +130,11 @@ def render_sales_tracker(df, targets):
     # STEP 5 — TARGET LOOKUPS
     # Sum daily targets across each time window
     # --------------------------------------------------------
+    # --------------------------------------------------------
+    # TARGETS
+    # Daily target for today pulled from targets sheet.
+    # WTD, MTD, YTD targets summed from daily rows.
+    # --------------------------------------------------------
     def get_target(start, end, col):
         mask = (
             (targets["Period Type"] == "Daily") &
@@ -138,9 +143,21 @@ def render_sales_tracker(df, targets):
         )
         return targets[mask][col].sum()
 
-    t_wtd = get_target(week_start, today, "Target GMV")
-    t_mtd = get_target(month_start, today, "Target GMV")
-    t_ytd = get_target(year_start, today, "Target GMV")
+    # Today's single daily target
+    t_today_revenue  = get_target(today, today, "Target Revenue")
+    t_today_gmv      = get_target(today, today, "Target GMV")
+    t_today_orders   = get_target(today, today, "Target Orders")
+    t_today_profit   = get_target(today, today, "Target Profit")
+
+
+    # WTD target — sum of daily targets from Monday to today
+    t_wtd_revenue = get_target(week_start, today, "Target Revenue")
+
+    # MTD target — sum of daily targets from 1st to today
+    t_mtd_revenue = get_target(month_start, today, "Target Revenue")
+
+    # YTD target — sum of daily targets from Jan 1 to today
+    t_ytd_revenue = get_target(year_start, today, "Target Revenue")
 
     # --------------------------------------------------------
     # STEP 6 — VS LAST WEEK
@@ -217,12 +234,42 @@ def render_sales_tracker(df, targets):
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        st.markdown("<div class='section-title'>📅 Yesterday Sales</div>", unsafe_allow_html=True)
-        kpi_card("GMV",        format_naira(y["gmv"]))
-        kpi_card("Revenue",    format_naira(y["revenue"]))
-        kpi_card("Orders",     str(y["orders"]))
-        kpi_card("Profit",     format_naira(y["profit"]))
+        st.markdown("<div class='section-title'>📅 Today's Sales</div>", unsafe_allow_html=True)
+        kpi_card("GMV", format_naira(y["gmv"]))
+        kpi_card("Revenue", format_naira(y["revenue"]))
+        kpi_card("Orders", str(y["orders"]))
+        kpi_card("Profit", format_naira(y["profit"]))
         kpi_card("Break-Even", format_naira(y["break_even"]))
+
+        # --------------------------------------------------------
+        # VS YESTERDAY — Today's GMV vs yesterday's GMV
+        # --------------------------------------------------------
+        df_yesterday_compare = df[
+            df["Date of Order"].dt.normalize() == yesterday
+        ]
+        yesterday_gmv = df_yesterday_compare["GMV"].sum()
+        yesterday_revenue = df_yesterday_compare["Revenue"].sum()
+
+        if yesterday_gmv > 0:
+            pct_vs_yday = ((y["gmv"] - yesterday_gmv) / yesterday_gmv * 100)
+            arrow_yday = f"▲{abs(pct_vs_yday):.1f}%" if pct_vs_yday >= 0 else f"▼{abs(pct_vs_yday):.1f}%"
+            color_yday = "green" if pct_vs_yday >= 0 else "red"
+            indicator_card("Vs Yesterday GMV", format_naira(yesterday_gmv), arrow_yday, color_yday)
+
+
+        # yesterday revenue comparison
+        if yesterday_revenue > 0:
+            pct_vs_yday_rev = ((y["revenue"] - yesterday_revenue) / yesterday_revenue * 100)
+            arrow_yday_rev = f"▲{abs(pct_vs_yday_rev):.1f}%" if pct_vs_yday_rev >= 0 else f"▼{abs(pct_vs_yday_rev):.1f}%"
+            color_yday_rev = "green" if pct_vs_yday_rev >= 0 else "red"
+            indicator_card("Vs Yesterday Revenue", format_naira(yesterday_revenue), arrow_yday_rev, color_yday_rev)
+
+        # Vs Today's Target
+        if t_today_revenue > 0:
+            pct_today = ((y["revenue"] - t_today_revenue) / t_today_revenue * 100)
+            arrow_today = f"▲{abs(pct_today):.1f}%" if pct_today >= 0 else f"▼{abs(pct_today):.1f}%"
+            color_today = "green" if pct_today >= 0 else "red"
+            indicator_card("Vs Target Revenue", format_naira(t_today_revenue), arrow_today, color_today)
 
     with c2:
         st.markdown("<div class='section-title'>📆 WTD Sales</div>", unsafe_allow_html=True)

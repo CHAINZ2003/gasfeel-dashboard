@@ -388,7 +388,9 @@ selected_tab = st.radio(
         "📦 Product",
         "👥 Customer",
         "🚴 Operation",
-        "🧠 Insights"
+        "👤 Agents",
+        "🎯 Intelligence",
+        "🧠 Insights",
     ],
     horizontal=True,
     label_visibility="collapsed"
@@ -420,3 +422,17 @@ elif selected_tab == "🚴 Operation":
 elif selected_tab == "🧠 Insights":
     from pages.insights import render_insights
     render_insights(filtered_df, targets)
+
+elif selected_tab == "👤 Agents":
+    from pages.agent import render_agent
+    render_agent(filtered_df)
+
+elif selected_tab == "🎯 Intelligence":
+    from pages.customer_intelligence import (
+        render_customer_intelligence,
+        render_retention_cohort,
+        render_product_frequency
+    )
+    render_customer_intelligence(filtered_df)
+    render_retention_cohort(filtered_df)
+    render_product_frequency(filtered_df)

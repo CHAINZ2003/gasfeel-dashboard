@@ -62,9 +62,30 @@ def render_product(df):
     avg_litres_per_order = total_quantity / total_orders if total_orders > 0 else 0
 
     # --------------------------------------------------------
-    # LAYOUT — TOP KPI ROW (4 cards across)
+    # PETROL FREQUENCY KPI
+    # Average number of times a petrol customer orders per month.
+    # Calculated from merged data (Sheets + Supabase).
+    # Formula: total petrol orders per month / unique petrol
+    # customers who ordered that month — then average across months.
     # --------------------------------------------------------
-    k1, k2, k3, k4 = st.columns(4)
+    petrol_df = df[df["Order Type"].str.contains("Petrol|PMS", case=False, na=False)]
+
+    if not petrol_df.empty:
+        petrol_monthly = petrol_df.groupby(["Year", "Month"]).agg(
+            Orders=("Order ID", "count"),
+            Unique_Customers=("Customer Name", "nunique")
+        ).reset_index()
+        petrol_monthly["Freq"] = (
+            petrol_monthly["Orders"] / petrol_monthly["Unique_Customers"]
+        )
+        avg_petrol_freq = petrol_monthly["Freq"].mean()
+    else:
+        avg_petrol_freq = 0
+
+    # --------------------------------------------------------
+    # LAYOUT — TOP KPI ROW (5 cards across)
+    # --------------------------------------------------------
+    k1, k2, k3, k4, k5 = st.columns(5)
 
     with k1:
         kpi_card("Total Orders", f"{total_orders:,}")
@@ -74,6 +95,8 @@ def render_product(df):
         kpi_card("Avg Order Value", format_naira(avg_order_value))
     with k4:
         kpi_card("Avg Litres/Kg per Order", f"{avg_litres_per_order:.1f}")
+    with k5:
+        kpi_card("Avg Petrol Orders/Customer/Month", f"{avg_petrol_freq:.1f}x")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
