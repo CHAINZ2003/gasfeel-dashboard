@@ -69,8 +69,92 @@ print(f"Petrol orders: {len(petrol)}")
 gas = [r for r in result.data if r.get("product") == "gas"]
 print(f"Gas orders: {len(gas)}")
 
+# ============================================================
+# TEST 9 — Find delivery time outliers in Supabase
+# ============================================================
+print("\n=== TEST 9: Delivery Time Analysis ===")
+
+result = supabase.table("orders").select(
+    "id,created_at,fulfillment_start,completion_time,"
+    "measured_delivery_time,zone,product,status"
+).eq("status", "closed").execute()
+
+import pandas as pd
+
+df = pd.DataFrame(result.data)
+df["created_at"] = pd.to_datetime(df["created_at"], utc=True)
+df["fulfillment_start"] = pd.to_datetime(df["fulfillment_start"], utc=True)
+df["completion_time"] = pd.to_datetime(df["completion_time"], utc=True)
+
+# Calculate delivery duration in minutes
+df["delivery_mins"] = (
+    df["completion_time"] - df["fulfillment_start"]
+).dt.total_seconds() / 60
+
+df["total_mins"] = (
+    df["completion_time"] - df["created_at"]
+).dt.total_seconds() / 60
+
+print(f"\nTotal closed orders: {len(df)}")
+print(f"\nDelivery duration stats (mins):")
+print(df["delivery_mins"].describe())
+
+print(f"\nTotal duration stats (mins):")
+print(df["total_mins"].describe())
+
+print(f"\nOrders with delivery > 60 mins:")
+outliers = df[df["delivery_mins"] > 60].sort_values("delivery_mins", ascending=False)
+print(outliers[["id","created_at","fulfillment_start","completion_time","delivery_mins","total_mins","zone","product"]].to_string())
+
+print(f"\nOrders with NULL fulfillment_start or completion_time:")
+nulls = df[df["fulfillment_start"].isna() | df["completion_time"].isna()]
+print(f"Count: {len(nulls)}")
 
 
+print("\n=== TEST 10: Check Google Sheets delivery time issue ===")
+import pandas as pd
+import requests
+from io import StringIO
+
+ORDERS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS3CDt_ulHB-4JN80DKixskyHZhE_caf75oKICt-dirQNmBb3gH9WDNDVrkXY2Y0ja862OV1DXv3y72/pub?gid=1183636741&single=true&output=csv"
+
+headers = {"User-Agent": "Mozilla/5.0"}
+response = requests.get(ORDERS_URL, headers=headers)
+df = pd.read_csv(StringIO(response.text))
+df.columns = df.columns.str.strip()
+df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+
+# Parse time columns
+df["Order Time Parsed"] = pd.to_datetime(
+    df["Order Time"].astype(str).str.strip(),
+    format="%I:%M:%S %p", errors="coerce"
+)
+df["Fulfillment Start Parsed"] = pd.to_datetime(
+    df["Fulfillment Start Time"].astype(str).str.strip(),
+    format="%I:%M:%S %p", errors="coerce"
+)
+df["Completion Parsed"] = pd.to_datetime(
+    df["Order Completion Time"].astype(str).str.strip(),
+    format="%I:%M:%S %p", errors="coerce"
+)
+
+# Calculate delivery duration
+df["delivery_mins"] = (
+    df["Completion Parsed"] - df["Fulfillment Start Parsed"]
+).dt.total_seconds() / 60
+
+# Fix midnight crossover
+df.loc[df["delivery_mins"] < 0, "delivery_mins"] = df.loc[
+    df["delivery_mins"] < 0, "delivery_mins"
+] + 1440
+
+print(f"Delivery duration stats (mins):")
+print(df["delivery_mins"].describe())
+
+print(f"\nOrders with delivery > 90 mins:")
+outliers = df[df["delivery_mins"] > 90].sort_values("delivery_mins", ascending=False)
+print(f"Count: {len(outliers)}")
+print(outliers[["Order ID", "Order Time", "Fulfillment Start Time", "Order Completion Time", "delivery_mins"]].head(20).to_string())
 print("\n=== ALL TESTS COMPLETE ===")
 
 

@@ -167,8 +167,11 @@ def clean_and_enrich(df):
 
     def safe_dur(start, end):
         dur = (end - start).dt.total_seconds() / 60
-        dur = dur.where(dur >= 0, dur + 1440)
-        dur = dur.where(dur <= 1440, None)
+        # If negative it's a data entry error — set to None
+        # Do NOT add 1440 — that makes bad data worse
+        dur = dur.where(dur >= 0, None)
+        # Cap at 90 minutes — anything above is outlier or data error
+        dur = dur.where(dur <= 90, None)
         return dur
 
     df["Total Duration (mins)"]      = safe_dur(order_time, finish_time)
@@ -339,14 +342,59 @@ def load_supabase_orders():
             orders_df.get("gas_stn", pd.Series("Unknown", index=orders_df.index))
         ).fillna("Unknown")
 
-        # Time columns — convert UTC timestamps to Lagos time
+        # --------------------------------------------------------
+        # TIME COLUMNS
+        # Store as string for display purposes only.
+        # --------------------------------------------------------
         orders_df["Order Time"] = orders_df["created_at_dt"].dt.strftime("%I:%M:%S %p")
-        orders_df["Fulfillment Start Time"] = pd.to_datetime(
+
+        # Parse full timestamps for accurate duration calculation
+        fulfillment_dt = pd.to_datetime(
             orders_df["fulfillment_start"], errors="coerce", utc=True
-        ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None).dt.strftime("%I:%M:%S %p")
-        orders_df["Order Completion Time"] = pd.to_datetime(
+        ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None)
+
+        completion_dt = pd.to_datetime(
             orders_df["completion_time"], errors="coerce", utc=True
-        ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None).dt.strftime("%I:%M:%S %p")
+        ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None)
+
+        orders_df["Fulfillment Start Time"] = fulfillment_dt.dt.strftime("%I:%M:%S %p")
+        orders_df["Order Completion Time"]  = completion_dt.dt.strftime("%I:%M:%S %p")
+
+        # --------------------------------------------------------
+        # CALCULATE DELIVERY DURATIONS FROM FULL TIMESTAMPS
+        # Using full datetime objects NOT time strings.
+        # This correctly handles midnight crossovers and
+        # multi-hour orders without any calculation errors.
+        # --------------------------------------------------------
+
+        # Total duration: order placed to completion
+        orders_df["Total Duration (mins)"] = (
+            completion_dt - orders_df["created_at_dt"]
+        ).dt.total_seconds() / 60
+
+        # Initiation duration: order placed to fulfillment start
+        orders_df["Initiation Duration (mins)"] = (
+            fulfillment_dt - orders_df["created_at_dt"]
+        ).dt.total_seconds() / 60
+
+        # Delivery duration: fulfillment start to completion
+        orders_df["Delivery Duration (mins)"] = (
+            completion_dt - fulfillment_dt
+        ).dt.total_seconds() / 60
+
+        # Remove negative durations — data entry errors
+        for col in ["Total Duration (mins)", "Initiation Duration (mins)", "Delivery Duration (mins)"]:
+            orders_df.loc[orders_df[col] < 0, col] = None
+            # Remove extreme outliers over 24 hours — likely data errors
+            orders_df.loc[orders_df[col] > 1440, col] = None
+
+
+            # Remove negative durations — data entry errors
+        # Cap at 120 minutes — anything above is a forgotten close or data error
+        for col in ["Total Duration (mins)", "Initiation Duration (mins)", "Delivery Duration (mins)"]:
+            orders_df.loc[orders_df[col] < 0, col] = None
+            orders_df.loc[orders_df[col] > 90, col] = None
+
 
         # Financial columns
         orders_df["Delivery Cost (how much we paid to the Rider)"] = pd.to_numeric(
