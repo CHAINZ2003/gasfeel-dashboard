@@ -165,25 +165,36 @@ def clean_and_enrich(df):
     start_time  = parse_time("Fulfillment Start Time")
     finish_time = parse_time("Order Completion Time")
 
+    # --------------------------------------------------------
+    # CORRECT DELIVERY TIME FORMULAS
+    # Initiation = Fulfillment Start - Order Time
+    # Delivery   = Order Completion - Fulfillment Start
+    # Total      = Order Completion - Order Time
+    # --------------------------------------------------------
     def safe_dur(start, end):
         dur = (end - start).dt.total_seconds() / 60
-        # If negative it's a data entry error — set to None
-        # Do NOT add 1440 — that makes bad data worse
+        # Negative = data entry error, set to None
         dur = dur.where(dur >= 0, None)
-        # Cap at 90 minutes — anything above is outlier or data error
+        # Cap at 90 mins — above is outlier or forgotten close
         dur = dur.where(dur <= 90, None)
         return dur
 
-    df["Total Duration (mins)"]      = safe_dur(order_time, finish_time)
+    # Initiation: Order Time → Fulfillment Start
     df["Initiation Duration (mins)"] = safe_dur(order_time, start_time)
 
-    if "Delivery Duration (mins)" not in df.columns or df["Delivery Duration (mins)"].isna().all():
-        df["Delivery Duration (mins)"] = safe_dur(start_time, finish_time)
+    # Delivery: Fulfillment Start → Order Completion
+    df["Delivery Duration (mins)"]   = safe_dur(start_time, finish_time)
 
-    # On-time flag — 10 minute threshold
-    df["On Time"] = df["Delivery Duration (mins)"].apply(
+    # Total: Order Time → Order Completion
+    df["Total Duration (mins)"]      = safe_dur(order_time, finish_time)
+
+
+    # On-time flag — 10 minute threshold on TOTAL journey
+    # Total journey = Order placed to Order completed (customer experience)
+    df["On Time"] = df["Total Duration (mins)"].apply(
         lambda x: x <= 10 if pd.notna(x) else None
     )
+
 
     # Free vs Paid delivery
     df["Delivery Type"] = df[
@@ -367,34 +378,37 @@ def load_supabase_orders():
         # multi-hour orders without any calculation errors.
         # --------------------------------------------------------
 
-        # Total duration: order placed to completion
-        orders_df["Total Duration (mins)"] = (
-            completion_dt - orders_df["created_at_dt"]
-        ).dt.total_seconds() / 60
+        # --------------------------------------------------------
+        # CORRECT DELIVERY TIME FORMULAS
+        # Initiation = Fulfillment Start - Order Time
+        # Delivery   = Order Completion - Fulfillment Start
+        # Total      = Order Completion - Order Time
+        # --------------------------------------------------------
 
-        # Initiation duration: order placed to fulfillment start
+        # Initiation: Order placed to Fulfillment started
         orders_df["Initiation Duration (mins)"] = (
             fulfillment_dt - orders_df["created_at_dt"]
         ).dt.total_seconds() / 60
 
-        # Delivery duration: fulfillment start to completion
+        # Delivery: Fulfillment started to Order completed
         orders_df["Delivery Duration (mins)"] = (
             completion_dt - fulfillment_dt
         ).dt.total_seconds() / 60
 
-        # Remove negative durations — data entry errors
-        for col in ["Total Duration (mins)", "Initiation Duration (mins)", "Delivery Duration (mins)"]:
-            orders_df.loc[orders_df[col] < 0, col] = None
-            # Remove extreme outliers over 24 hours — likely data errors
-            orders_df.loc[orders_df[col] > 1440, col] = None
+        # Total: Order placed to Order completed (used for on-time flag)
+        orders_df["Total Duration (mins)"] = (
+            completion_dt - orders_df["created_at_dt"]
+        ).dt.total_seconds() / 60
 
-
-            # Remove negative durations — data entry errors
-        # Cap at 120 minutes — anything above is a forgotten close or data error
+        # Remove negatives and cap at 90 mins — outliers and data errors
         for col in ["Total Duration (mins)", "Initiation Duration (mins)", "Delivery Duration (mins)"]:
             orders_df.loc[orders_df[col] < 0, col] = None
             orders_df.loc[orders_df[col] > 90, col] = None
 
+        # On-time flag — 10 minute threshold on TOTAL journey
+        orders_df["On Time"] = orders_df["Total Duration (mins)"].apply(
+            lambda x: x <= 10 if pd.notna(x) else None
+        )
 
         # Financial columns
         orders_df["Delivery Cost (how much we paid to the Rider)"] = pd.to_numeric(
@@ -404,7 +418,7 @@ def load_supabase_orders():
             orders_df.get("delivery_fee", 0), errors="coerce"
         ).fillna(0)
 
-        gmv_series = pd.to_numeric(orders_df.get("gmv", orders_df["grand_total"]), errors="coerce")
+        gmv_series   = pd.to_numeric(orders_df.get("gmv", orders_df["grand_total"]), errors="coerce")
         grand_series = pd.to_numeric(orders_df["grand_total"], errors="coerce")
         orders_df["Revenue (Total Customer Payment)"] = gmv_series.fillna(grand_series)
 
@@ -420,10 +434,6 @@ def load_supabase_orders():
             orders_df.get("profit", pd.Series(0, index=orders_df.index)),
             errors="coerce"
         ).fillna(0)
-        orders_df["Delivery Duration (mins)"] = pd.to_numeric(
-            orders_df.get("measured_delivery_time"),
-            errors="coerce"
-        )
         orders_df["Data Source"] = "Supabase"
 
         # Keep only standard columns
@@ -438,12 +448,14 @@ def load_supabase_orders():
             "Delivery Fee (Amount we Collected from the customer)",
             "Revenue (Total Customer Payment)", "COGS(naira)",
             "Revenue", "Profit",
-            "Delivery Duration (mins)", "Data Source"
+            "Initiation Duration (mins)", "Delivery Duration (mins)",
+            "Total Duration (mins)", "Data Source"
         ]
         orders_df = orders_df[[c for c in keep_cols if c in orders_df.columns]]
         orders_df = clean_and_enrich(orders_df)
         return orders_df
 
+    
     except Exception as e:
         st.warning(f"Supabase load failed: {e}")
         return pd.DataFrame()
