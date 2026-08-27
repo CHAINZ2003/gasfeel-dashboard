@@ -70,7 +70,8 @@ def load_agent_data():
         interactions_df["Month"] = interactions_df["submitted_at"].dt.month
         interactions_df["Month Name"] = interactions_df["submitted_at"].dt.strftime("%B")
         interactions_df["Year"] = interactions_df["submitted_at"].dt.year
-        interactions_df["Week"] = interactions_df["submitted_at"].dt.isocalendar().week.astype(int)
+        interactions_df = interactions_df.dropna(subset=["submitted_at"])
+        interactions_df["Week"] = interactions_df["submitted_at"].dt.isocalendar().week.astype("Int64")
         interactions_df["revenue"] = pd.to_numeric(interactions_df["revenue"], errors="coerce").fillna(0)
         interactions_df["commission_earned"] = pd.to_numeric(
             interactions_df["commission_earned"], errors="coerce"
