@@ -83,8 +83,9 @@ import pandas as pd
 
 df = pd.DataFrame(result.data)
 df["created_at"] = pd.to_datetime(df["created_at"], utc=True)
-df["fulfillment_start"] = pd.to_datetime(df["fulfillment_start"], utc=True)
-df["completion_time"] = pd.to_datetime(df["completion_time"], utc=True)
+df["fulfillment_start"] = pd.to_datetime(df["fulfillment_start"], utc=True, format="ISO8601")
+df["completion_time"] = pd.to_datetime(df["completion_time"], utc=True, format="ISO8601")
+
 
 # Calculate delivery duration in minutes
 df["delivery_mins"] = (
@@ -155,6 +156,23 @@ print(f"\nOrders with delivery > 90 mins:")
 outliers = df[df["delivery_mins"] > 90].sort_values("delivery_mins", ascending=False)
 print(f"Count: {len(outliers)}")
 print(outliers[["Order ID", "Order Time", "Fulfillment Start Time", "Order Completion Time", "delivery_mins"]].head(20).to_string())
+
+print("\n=== TEST 11: Check financial columns in Supabase orders ===")
+
+result = supabase.table("orders").select(
+    "id,grand_total,rider_payout,delivery_fee,"
+    "cost_price,margin,vat,deposit_used"
+).eq("status", "closed").limit(10).execute()
+
+print("Sample orders financial data:")
+for row in result.data:
+    print(row)
+
+print("\n=== TEST 12: Check order_items financial columns ===")
+result = supabase.table("order_items").select("*").limit(5).execute()
+print("Sample order_items:")
+for row in result.data:
+    print(row)
 print("\n=== ALL TESTS COMPLETE ===")
 
 

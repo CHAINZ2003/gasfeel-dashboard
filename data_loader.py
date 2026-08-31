@@ -2,7 +2,7 @@
 # DATA LOADER — GasFeel Dashboard
 # DUAL SOURCE with clean date cutoff:
 # Google Sheets → Jan 2026 to Jul 31 2026 (historical)
-# Supabase → Aug 1 2026 onwards (live app data)
+# Supabase      → Aug 1 2026 onwards (live app data)
 # No overlap. No duplicates. Clean merge.
 # ============================================================
 
@@ -15,14 +15,14 @@ from supabase import create_client
 
 # ============================================================
 # CUTOFF DATE
-# Everything before this = Google Sheets
-# Everything from this date = Supabase
+# Everything before this date = Google Sheets
+# Everything from this date onwards = Supabase
 # ============================================================
 SUPABASE_CUTOFF = pd.Timestamp("2026-08-01")
 
 
 # ============================================================
-# GOOGLE SHEETS URLs
+# GOOGLE SHEETS URLs — Historical data + Targets
 # ============================================================
 ORDERS_URL  = st.secrets["ORDERS_URL"]
 TARGETS_URL = st.secrets["TARGETS_URL"]
@@ -30,6 +30,7 @@ TARGETS_URL = st.secrets["TARGETS_URL"]
 
 # ============================================================
 # SUPABASE CLIENT
+# Uses service_role key to bypass RLS and see all data.
 # ============================================================
 @st.cache_resource
 def get_supabase():
@@ -77,6 +78,14 @@ def fetch_all_rows(table, select="*", eq_filter=None):
 
 
 # ============================================================
+# HELPER — SAFE NUMERIC CONVERSION
+# Converts a column to float safely, filling nulls with 0.
+# ============================================================
+def safe_num(series, fill=0):
+    return pd.to_numeric(series, errors="coerce").fillna(fill)
+
+
+# ============================================================
 # HELPER — CLEAN AND ENRICH DATAFRAME
 # Applies cleaning, date parsing, and calculated columns
 # to any dataframe regardless of source.
@@ -91,7 +100,6 @@ def clean_and_enrich(df):
 
     # --------------------------------------------------------
     # CONVERT DATE OF ORDER
-    # Both sources use "Date of Order" column after renaming.
     # --------------------------------------------------------
     df["Date of Order"] = pd.to_datetime(df["Date of Order"], errors="coerce")
     df = df.dropna(subset=["Date of Order"])
@@ -102,7 +110,7 @@ def clean_and_enrich(df):
     df["Year"]       = df["Date of Order"].dt.year
     df["Week"]       = df["Date of Order"].dt.isocalendar().week.astype("Int64")
 
-    # Clean text columns — proper case, strip whitespace
+    # Clean text columns
     text_cols = [
         "Customer Name", "Rider Name",
         "Order Area/Location", "Station", "Order Type"
@@ -112,7 +120,7 @@ def clean_and_enrich(df):
             df[col] = df[col].astype(str).str.strip().str.title()
             df[col] = df[col].replace("Nan", None)
 
-    # Clean numeric columns — remove commas
+    # Clean numeric columns for Google Sheets source
     numeric_cols = [
         "Cost Price (Per kg/liter)",
         "Selling Price (Per kg/Liter)",
@@ -138,20 +146,22 @@ def clean_and_enrich(df):
     # Revenue = GMV - COGS
     # Profit  = Revenue - Delivery Cost
     # --------------------------------------------------------
-    df["GMV"] = df["Revenue (Total Customer Payment)"]
+    df["GMV"] = safe_num(df["Revenue (Total Customer Payment)"])
 
     if "Revenue" not in df.columns or df["Revenue"].isna().all():
-        df["Revenue"] = df["GMV"] - df["COGS(naira)"].fillna(0)
+        df["Revenue"] = df["GMV"] - safe_num(df.get("COGS(naira)", pd.Series(0, index=df.index)))
 
     if "Profit" not in df.columns or df["Profit"].isna().all():
-        df["Profit"] = (
-            df["Revenue"] -
-            df["Delivery Cost (how much we paid to the Rider)"].fillna(0)
+        df["Profit"] = df["Revenue"] - safe_num(
+            df.get("Delivery Cost (how much we paid to the Rider)", pd.Series(0, index=df.index))
         )
 
     # --------------------------------------------------------
     # DELIVERY TIME CALCULATIONS
-    # Midnight crossover fix: add 1440 mins if result negative.
+    # Initiation = Fulfillment Start - Order Time
+    # Delivery   = Order Completion - Fulfillment Start
+    # Total      = Order Completion - Order Time
+    # Cap at 90 mins — above is outlier or data error
     # --------------------------------------------------------
     def parse_time(col):
         if col in df.columns:
@@ -165,36 +175,20 @@ def clean_and_enrich(df):
     start_time  = parse_time("Fulfillment Start Time")
     finish_time = parse_time("Order Completion Time")
 
-    # --------------------------------------------------------
-    # CORRECT DELIVERY TIME FORMULAS
-    # Initiation = Fulfillment Start - Order Time
-    # Delivery   = Order Completion - Fulfillment Start
-    # Total      = Order Completion - Order Time
-    # --------------------------------------------------------
     def safe_dur(start, end):
         dur = (end - start).dt.total_seconds() / 60
-        # Negative = data entry error, set to None
         dur = dur.where(dur >= 0, None)
-        # Cap at 90 mins — above is outlier or forgotten close
         dur = dur.where(dur <= 90, None)
         return dur
 
-    # Initiation: Order Time → Fulfillment Start
     df["Initiation Duration (mins)"] = safe_dur(order_time, start_time)
-
-    # Delivery: Fulfillment Start → Order Completion
     df["Delivery Duration (mins)"]   = safe_dur(start_time, finish_time)
-
-    # Total: Order Time → Order Completion
     df["Total Duration (mins)"]      = safe_dur(order_time, finish_time)
 
-
     # On-time flag — 10 minute threshold on TOTAL journey
-    # Total journey = Order placed to Order completed (customer experience)
     df["On Time"] = df["Total Duration (mins)"].apply(
         lambda x: x <= 10 if pd.notna(x) else None
     )
-
 
     # Free vs Paid delivery
     df["Delivery Type"] = df[
@@ -208,9 +202,8 @@ def clean_and_enrich(df):
 
 
 # ============================================================
-# LOAD GOOGLE SHEETS ORDERS
-# Historical data — Jan 2026 to Jul 31 2026 only.
-# Filtered by Date of Order column (not Timestamp).
+# LOAD GOOGLE SHEETS ORDERS — Historical data
+# Jan 2026 to Jul 31 2026 only.
 # ============================================================
 def load_sheets_orders():
     try:
@@ -218,11 +211,9 @@ def load_sheets_orders():
         df.columns = df.columns.str.strip()
         df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
 
-        # Convert Date of Order first so we can filter
+        # Convert date and filter before cutoff
         df["Date of Order"] = pd.to_datetime(df["Date of Order"], errors="coerce")
         df = df.dropna(subset=["Date of Order"])
-
-        # Keep only orders BEFORE the cutoff date
         df = df[df["Date of Order"] < SUPABASE_CUTOFF]
 
         df["Data Source"] = "Google Sheets"
@@ -235,18 +226,19 @@ def load_sheets_orders():
 
 
 # ============================================================
-# LOAD SUPABASE ORDERS
-# Live data — Aug 1 2026 onwards only.
-# Status = 'closed' confirmed from database test.
+# LOAD SUPABASE ORDERS — Live app data from Aug 1 2026
 # ============================================================
 def load_supabase_orders():
     try:
-        # Fetch closed orders from Aug 1 onwards
+        # --------------------------------------------------------
+        # FETCH CLOSED ORDERS
+        # --------------------------------------------------------
         orders_df = fetch_all_rows(
             "orders",
             select="id,created_at,customer_whatsapp,product,"
                    "rider_id,petrol_station_id,gas_station_id,"
                    "zone,rider_payout,delivery_fee,grand_total,"
+                   "cost_price,margin,vat,deposit_used,"
                    "status,fulfillment_start,completion_time,"
                    "measured_delivery_time,is_member_free_delivery,"
                    "agent_order_id",
@@ -256,23 +248,22 @@ def load_supabase_orders():
         if orders_df.empty:
             return pd.DataFrame()
 
-        # Convert created_at to date and filter from Aug 1 onwards
+        # --------------------------------------------------------
+        # CONVERT TIMESTAMPS TO LAGOS TIME
+        # --------------------------------------------------------
         orders_df["created_at_dt"] = pd.to_datetime(
-            orders_df["created_at"], errors="coerce", utc=True
+            orders_df["created_at"], errors="coerce", utc=True, format="ISO8601"
         ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None)
 
-        orders_df = orders_df[
-            orders_df["created_at_dt"] >= SUPABASE_CUTOFF
-        ]
+        # Filter from Aug 1 2026 onwards
+        orders_df = orders_df[orders_df["created_at_dt"] >= SUPABASE_CUTOFF]
 
         if orders_df.empty:
             return pd.DataFrame()
 
-        # Fetch supporting tables
-        items_df = fetch_all_rows(
-            "order_items",
-            select="order_id,quantity,cost_price,selling_price,cogs,gmv,revenue,profit"
-        )
+        # --------------------------------------------------------
+        # FETCH SUPPORTING TABLES
+        # --------------------------------------------------------
         customers_df = fetch_all_rows(
             "customers",
             select="whatsapp_number,name"
@@ -286,18 +277,14 @@ def load_supabase_orders():
             select="id,station_name"
         )
 
-        # Merge supporting tables
-        if not items_df.empty:
-            orders_df = orders_df.merge(
-                items_df,
-                left_on="id", right_on="order_id",
-                how="left"
-            )
-
+        # --------------------------------------------------------
+        # MERGE SUPPORTING TABLES
+        # --------------------------------------------------------
         if not customers_df.empty:
             orders_df = orders_df.merge(
                 customers_df,
-                left_on="customer_whatsapp", right_on="whatsapp_number",
+                left_on="customer_whatsapp",
+                right_on="whatsapp_number",
                 how="left"
             )
 
@@ -320,123 +307,138 @@ def load_supabase_orders():
                 how="left"
             )
 
-        # Map product names to match Google Sheets format
+        # --------------------------------------------------------
+        # MAP PRODUCT NAMES to match Google Sheets format
+        # --------------------------------------------------------
         product_map = {
             "gas":    "Gas (LPG)",
             "petrol": "Petrol (PMS)",
             "oil":    "Engine Oil"
         }
-        orders_df["product"] = orders_df["product"].str.lower().map(
+        orders_df["product"] = orders_df["product"].astype(str).str.lower().map(
             product_map
         ).fillna(orders_df["product"])
 
-        # Clean zone names — strip suffixes like "(before T-junction)"
-        orders_df["zone"] = orders_df["zone"].fillna("Unknown").str.split(
+        # --------------------------------------------------------
+        # CLEAN ZONE NAMES
+        # Strip suffixes like "(before T-junction)"
+        # --------------------------------------------------------
+        orders_df["zone"] = orders_df["zone"].fillna("Unknown").astype(str).str.split(
             r'\(', expand=True, regex=True
         )[0].str.strip()
 
-        # Rename to dashboard standard column names
-        orders_df["Order ID"] = orders_df["agent_order_id"].fillna(
-            orders_df["id"].astype(str)
-        )
-        orders_df["Date of Order"] = orders_df["created_at_dt"].dt.strftime("%Y-%m-%d")
-        orders_df["Day of the Week"] = orders_df["created_at_dt"].dt.strftime("%a")
-        orders_df["Order Type"]      = orders_df["product"]
-        orders_df["Litre/Kg Sold"]   = pd.to_numeric(orders_df.get("quantity", 0), errors="coerce").fillna(0)
-        orders_df["Cost Price (Per kg/liter)"]    = pd.to_numeric(orders_df.get("cost_price", 0), errors="coerce").fillna(0)
-        orders_df["Selling Price (Per kg/Liter)"] = pd.to_numeric(orders_df.get("selling_price", 0), errors="coerce").fillna(0)
-        orders_df["Customer Name"]       = orders_df.get("name", orders_df["customer_whatsapp"]).fillna(orders_df["customer_whatsapp"])
-        orders_df["Customer Phone"]      = orders_df["customer_whatsapp"]
-        orders_df["Order Area/Location"] = orders_df["zone"]
-        orders_df["Rider Name"]          = orders_df.get("rider_name", pd.Series("Unknown", index=orders_df.index)).fillna("Unknown")
-        orders_df["Station"]             = orders_df.get("petrol_stn", pd.Series("Unknown", index=orders_df.index)).fillna(
-            orders_df.get("gas_stn", pd.Series("Unknown", index=orders_df.index))
-        ).fillna("Unknown")
-
         # --------------------------------------------------------
-        # TIME COLUMNS
-        # Store as string for display purposes only.
+        # PARSE FULFILLMENT AND COMPLETION TIMESTAMPS
+        # Use full datetime objects for accurate duration calculation
         # --------------------------------------------------------
-        orders_df["Order Time"] = orders_df["created_at_dt"].dt.strftime("%I:%M:%S %p")
-
-        # Parse full timestamps for accurate duration calculation
         fulfillment_dt = pd.to_datetime(
-            orders_df["fulfillment_start"], errors="coerce", utc=True
+            orders_df["fulfillment_start"],
+            errors="coerce", utc=True, format="ISO8601"
         ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None)
 
         completion_dt = pd.to_datetime(
-            orders_df["completion_time"], errors="coerce", utc=True
+            orders_df["completion_time"],
+            errors="coerce", utc=True, format="ISO8601"
         ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None)
 
+        # --------------------------------------------------------
+        # RENAME TO DASHBOARD STANDARD COLUMN NAMES
+        # --------------------------------------------------------
+        orders_df["Order ID"] = orders_df["agent_order_id"].fillna(
+            orders_df["id"].astype(str)
+        )
+        orders_df["Date of Order"]    = orders_df["created_at_dt"].dt.strftime("%Y-%m-%d")
+        orders_df["Day of the Week"]  = orders_df["created_at_dt"].dt.strftime("%a")
+        orders_df["Order Type"]       = orders_df["product"]
+        orders_df["Customer Name"]    = orders_df.get(
+            "name", orders_df["customer_whatsapp"]
+        ).fillna(orders_df["customer_whatsapp"])
+        orders_df["Customer Phone"]      = orders_df["customer_whatsapp"]
+        orders_df["Order Area/Location"] = orders_df["zone"]
+        orders_df["Rider Name"]          = orders_df.get(
+            "rider_name", pd.Series("Unknown", index=orders_df.index)
+        ).fillna("Unknown")
+
+        # Station — use petrol station, fall back to gas station
+        petrol_stn = orders_df.get("petrol_stn", pd.Series(dtype=str))
+        gas_stn    = orders_df.get("gas_stn", pd.Series(dtype=str))
+        orders_df["Station"] = petrol_stn.fillna(gas_stn).fillna("Unknown")
+
+        # Time columns for display only
+        orders_df["Order Time"] = orders_df["created_at_dt"].dt.strftime("%I:%M:%S %p")
         orders_df["Fulfillment Start Time"] = fulfillment_dt.dt.strftime("%I:%M:%S %p")
         orders_df["Order Completion Time"]  = completion_dt.dt.strftime("%I:%M:%S %p")
 
-        # --------------------------------------------------------
-        # CALCULATE DELIVERY DURATIONS FROM FULL TIMESTAMPS
-        # Using full datetime objects NOT time strings.
-        # This correctly handles midnight crossovers and
-        # multi-hour orders without any calculation errors.
-        # --------------------------------------------------------
+        # Quantity and price
+        orders_df["Litre/Kg Sold"] = safe_num(
+            orders_df.get("quantity", pd.Series(0, index=orders_df.index))
+        )
+        orders_df["Cost Price (Per kg/liter)"] = safe_num(
+            orders_df.get("cost_price_y", orders_df.get("cost_price", pd.Series(0, index=orders_df.index)))
+        )
+        orders_df["Selling Price (Per kg/Liter)"] = safe_num(
+            orders_df.get("selling_price", pd.Series(0, index=orders_df.index))
+        )
 
         # --------------------------------------------------------
-        # CORRECT DELIVERY TIME FORMULAS
+        # FINANCIAL MODEL — Supabase
+        # GMV     = grand_total (full customer payment)
+        # COGS    = cost_price from orders table
+        # Revenue = GMV - COGS
+        # Profit  = Revenue - rider_payout
+        # --------------------------------------------------------
+        grand_total  = safe_num(orders_df["grand_total"])
+        cost_price   = safe_num(orders_df.get("cost_price", pd.Series(0, index=orders_df.index)))
+        rider_payout = safe_num(orders_df.get("rider_payout", pd.Series(0, index=orders_df.index)))
+        delivery_fee = safe_num(orders_df.get("delivery_fee", pd.Series(0, index=orders_df.index)))
+        
+
+        orders_df["Revenue (Total Customer Payment)"] = grand_total
+        orders_df["COGS(naira)"]  = cost_price
+        orders_df["GMV"]          = grand_total
+        orders_df["Revenue"]      = grand_total - cost_price
+        orders_df["Profit"]       = grand_total - cost_price - rider_payout
+        orders_df["Delivery Cost (how much we paid to the Rider)"] = rider_payout
+        orders_df["Delivery Fee (Amount we Collected from the customer)"] = delivery_fee
+
+        # --------------------------------------------------------
+        # DELIVERY TIME FROM FULL TIMESTAMPS
         # Initiation = Fulfillment Start - Order Time
-        # Delivery   = Order Completion - Fulfillment Start
-        # Total      = Order Completion - Order Time
+        # Delivery   = Completion - Fulfillment Start
+        # Total      = Completion - Order Time
+        # Cap at 90 mins
         # --------------------------------------------------------
+        def calc_dur(start, end):
+            dur = (end - start).dt.total_seconds() / 60
+            dur = dur.where(dur >= 0, None)
+            dur = dur.where(dur <= 90, None)
+            return dur
 
-        # Initiation: Order placed to Fulfillment started
-        orders_df["Initiation Duration (mins)"] = (
-            fulfillment_dt - orders_df["created_at_dt"]
-        ).dt.total_seconds() / 60
-
-        # Delivery: Fulfillment started to Order completed
-        orders_df["Delivery Duration (mins)"] = (
-            completion_dt - fulfillment_dt
-        ).dt.total_seconds() / 60
-
-        # Total: Order placed to Order completed (used for on-time flag)
-        orders_df["Total Duration (mins)"] = (
-            completion_dt - orders_df["created_at_dt"]
-        ).dt.total_seconds() / 60
-
-        # Remove negatives and cap at 90 mins — outliers and data errors
-        for col in ["Total Duration (mins)", "Initiation Duration (mins)", "Delivery Duration (mins)"]:
-            orders_df.loc[orders_df[col] < 0, col] = None
-            orders_df.loc[orders_df[col] > 90, col] = None
+        orders_df["Initiation Duration (mins)"] = calc_dur(
+            orders_df["created_at_dt"], fulfillment_dt
+        )
+        orders_df["Delivery Duration (mins)"] = calc_dur(
+            fulfillment_dt, completion_dt
+        )
+        orders_df["Total Duration (mins)"] = calc_dur(
+            orders_df["created_at_dt"], completion_dt
+        )
 
         # On-time flag — 10 minute threshold on TOTAL journey
         orders_df["On Time"] = orders_df["Total Duration (mins)"].apply(
             lambda x: x <= 10 if pd.notna(x) else None
         )
 
-        # Financial columns
-        orders_df["Delivery Cost (how much we paid to the Rider)"] = pd.to_numeric(
-            orders_df.get("rider_payout", 0), errors="coerce"
-        ).fillna(0)
-        orders_df["Delivery Fee (Amount we Collected from the customer)"] = pd.to_numeric(
-            orders_df.get("delivery_fee", 0), errors="coerce"
-        ).fillna(0)
+        # Free vs Paid delivery
+        orders_df["Delivery Type"] = delivery_fee.apply(
+            lambda x: "Free" if x == 0 else "Paid"
+        )
 
-        gmv_series   = pd.to_numeric(orders_df.get("gmv", orders_df["grand_total"]), errors="coerce")
-        grand_series = pd.to_numeric(orders_df["grand_total"], errors="coerce")
-        orders_df["Revenue (Total Customer Payment)"] = gmv_series.fillna(grand_series)
-
-        orders_df["COGS(naira)"] = pd.to_numeric(
-            orders_df.get("cogs", pd.Series(0, index=orders_df.index)),
-            errors="coerce"
-        ).fillna(0)
-        orders_df["Revenue"] = pd.to_numeric(
-            orders_df.get("revenue", pd.Series(0, index=orders_df.index)),
-            errors="coerce"
-        ).fillna(0)
-        orders_df["Profit"] = pd.to_numeric(
-            orders_df.get("profit", pd.Series(0, index=orders_df.index)),
-            errors="coerce"
-        ).fillna(0)
         orders_df["Data Source"] = "Supabase"
 
-        # Keep only standard columns
+        # --------------------------------------------------------
+        # KEEP ONLY STANDARD COLUMNS
+        # --------------------------------------------------------
         keep_cols = [
             "Order ID", "Date of Order", "Day of the Week",
             "Order Type", "Litre/Kg Sold",
@@ -447,25 +449,26 @@ def load_supabase_orders():
             "Delivery Cost (how much we paid to the Rider)",
             "Delivery Fee (Amount we Collected from the customer)",
             "Revenue (Total Customer Payment)", "COGS(naira)",
-            "Revenue", "Profit",
+            "GMV", "Revenue", "Profit",
             "Initiation Duration (mins)", "Delivery Duration (mins)",
-            "Total Duration (mins)", "Data Source"
+            "Total Duration (mins)", "On Time", "Delivery Type",
+            "Data Source"
         ]
         orders_df = orders_df[[c for c in keep_cols if c in orders_df.columns]]
+
+        # Apply standard cleaning
         orders_df = clean_and_enrich(orders_df)
         return orders_df
 
-    
     except Exception as e:
         st.warning(f"Supabase load failed: {e}")
         return pd.DataFrame()
 
 
 # ============================================================
-# LOAD ORDERS — MERGED WITH CLEAN DATE CUTOFF
+# LOAD ORDERS — MERGED FROM BOTH SOURCES
 # Google Sheets: Jan 2026 to Jul 31 2026
 # Supabase: Aug 1 2026 onwards
-# No overlap possible. No deduplication needed.
 # ============================================================
 @st.cache_data(ttl=600)
 def load_orders():
@@ -491,19 +494,23 @@ def load_orders():
 
 # ============================================================
 # LOAD TARGETS — Always from Google Sheets
-# Supabase ops_targets is empty so Sheets is permanent source.
+# Supabase ops_targets is empty.
 # ============================================================
 @st.cache_data(ttl=600)
 def load_targets():
-    df = fetch_csv(TARGETS_URL)
-    df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
-    df.columns = df.columns.str.strip()
-    df["Period"] = pd.to_datetime(df["Period"], errors="coerce")
-    for col in ["Target GMV", "Target Revenue", "Target Profit",
-                "Target Orders", "Target Delivery Cost"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(
-                df[col].astype(str).str.replace(",", "", regex=False),
-                errors="coerce"
-            )
-    return df
+    try:
+        df = fetch_csv(TARGETS_URL)
+        df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+        df.columns = df.columns.str.strip()
+        df["Period"] = pd.to_datetime(df["Period"], errors="coerce")
+        for col in ["Target GMV", "Target Revenue", "Target Profit",
+                    "Target Orders", "Target Delivery Cost"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(
+                    df[col].astype(str).str.replace(",", "", regex=False),
+                    errors="coerce"
+                )
+        return df
+    except Exception as e:
+        st.warning(f"Targets load failed: {e}")
+        return pd.DataFrame()
