@@ -95,7 +95,7 @@ def render_revenue(df):
             delta=f"{pm_delta:.1f}%",
             delta_color="normal"
         )
-
+        kpi_card("Delivery Fee", format_naira(total_delivery_fee))
         kpi_card("Delivery Profit", format_naira(delivery_profit))
 
     # --------------------------------------------------------
