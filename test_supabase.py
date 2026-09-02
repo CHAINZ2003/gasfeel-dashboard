@@ -6,8 +6,8 @@
 
 from supabase import create_client
 
-SUPABASE_URL = "https://mvbcevkxcuexilqqksou.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im12YmNldmt4Y3VleGlscXFrc291Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjczNTc5OCwiZXhwIjoyMDk4MzExNzk4fQ.-3-OijZOipp8-As5obQnmmHQWT9pYNpaxHDIMJ-vXqM"
+SUPABASE_URL = ""
+SUPABASE_KEY = ""
 
 print("Connecting to Supabase...")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
