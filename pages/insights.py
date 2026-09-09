@@ -69,7 +69,7 @@ def snap(label, value, sub=None, color="#003399"):
             {sub_html}
         </div>
     """, unsafe_allow_html=True)
-
+    
 
 # ============================================================
 # LOAD AGENT DATA FOR INSIGHTS
@@ -531,3 +531,18 @@ def render_insights(df, targets):
         f"{'Consider reviewing free delivery eligibility to reduce subsidy.' if free_pct > 50 else 'Delivery fee collection is healthy.'}",
         free_color
     )
+
+
+
+# ============================================================
+# HELPER — CHART DESCRIPTION
+# Shows a small explanatory note below every chart title.
+# Helps team members understand what each chart means.
+# ============================================================
+def chart_note(text):
+    st.markdown(f"""
+        <p style='color:#888;font-size:12px;font-style:italic;
+                  margin:-8px 0 10px 0;line-height:1.5;'>
+            💡 {text}
+        </p>
+    """, unsafe_allow_html=True)

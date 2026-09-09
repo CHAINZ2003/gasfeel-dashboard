@@ -3,6 +3,7 @@
 # Deep customer analysis using enriched Supabase customers table.
 # Shows membership, deposits, run-out dates, acquisition channels,
 # retention cohorts, and product frequency analysis.
+# All charts include descriptions for team readability.
 # ============================================================
 
 import streamlit as st
@@ -31,6 +32,18 @@ def format_naira(value):
 
 
 # ============================================================
+# HELPER — CHART DESCRIPTION
+# ============================================================
+def chart_note(text):
+    st.markdown(f"""
+        <p style='color:#888;font-size:12px;font-style:italic;
+                  margin:-8px 0 10px 0;line-height:1.5;'>
+            💡 {text}
+        </p>
+    """, unsafe_allow_html=True)
+
+
+# ============================================================
 # HELPER — LOAD CUSTOMER DATA FROM SUPABASE
 # ============================================================
 @st.cache_data(ttl=600)
@@ -41,7 +54,6 @@ def load_customer_intelligence():
             st.secrets["SUPABASE_KEY"]
         )
 
-        # Fetch all customers
         all_customers = []
         offset = 0
         while True:
@@ -62,7 +74,6 @@ def load_customer_intelligence():
 
         df = pd.DataFrame(all_customers)
 
-        # Convert date columns
         date_cols = [
             "last_bought_date", "run_out_date",
             "next_reachout_date", "created_at"
@@ -71,7 +82,6 @@ def load_customer_intelligence():
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
 
-        # Convert numeric columns
         num_cols = [
             "deposit_balance", "usual_kg",
             "daily_fuel_amount", "membership_deliveries_used",
@@ -89,13 +99,11 @@ def load_customer_intelligence():
 
 
 # ============================================================
-# MAIN RENDER FUNCTION
+# MAIN RENDER FUNCTION — CUSTOMER INTELLIGENCE
 # ============================================================
 def render_customer_intelligence(orders_df):
 
-    today = pd.Timestamp.now().normalize()
-
-    # Load enriched customer data from Supabase
+    today        = pd.Timestamp.now().normalize()
     customers_df = load_customer_intelligence()
 
     if customers_df.empty:
@@ -103,32 +111,42 @@ def render_customer_intelligence(orders_df):
         return
 
     # --------------------------------------------------------
-    # SECTION 1 — TOP KPI SNAPSHOT
+    # CALCULATE SNAPSHOT METRICS
+    # --------------------------------------------------------
+    total_customers  = len(customers_df)
+    active_customers = customers_df["is_active"].sum()
+    member_customers = customers_df["is_member"].sum()
+    total_deposit    = customers_df["deposit_balance"].sum()
+    avg_deposit      = customers_df[
+        customers_df["deposit_balance"] > 0
+    ]["deposit_balance"].mean()
+
+    running_out_soon = customers_df[
+        (customers_df["run_out_date"] >= today) &
+        (customers_df["run_out_date"] <= today + timedelta(days=7))
+    ]
+    reachout_due = customers_df[
+        customers_df["next_reachout_date"].notna() &
+        (customers_df["next_reachout_date"] <= today)
+    ]
+    mem_util = (
+        customers_df["membership_deliveries_used"].sum() /
+        customers_df["membership_deliveries_total"].sum() * 100
+        if customers_df["membership_deliveries_total"].sum() > 0 else 0
+    )
+
+    # --------------------------------------------------------
+    # SECTION 1 — SNAPSHOT KPIs
     # --------------------------------------------------------
     st.markdown(
         "<div class='section-title'>⚡ Customer Intelligence Snapshot</div>",
         unsafe_allow_html=True
     )
-
-    total_customers    = len(customers_df)
-    active_customers   = customers_df["is_active"].sum()
-    member_customers   = customers_df["is_member"].sum()
-    total_deposit      = customers_df["deposit_balance"].sum()
-    avg_deposit        = customers_df[
-        customers_df["deposit_balance"] > 0
-    ]["deposit_balance"].mean()
-
-    # Customers running out in next 7 days
-    running_out_soon = customers_df[
-        (customers_df["run_out_date"] >= today) &
-        (customers_df["run_out_date"] <= today + timedelta(days=7))
-    ]
-
-    # Customers due for reachout today or overdue
-    reachout_due = customers_df[
-        customers_df["next_reachout_date"].notna() &
-        (customers_df["next_reachout_date"] <= today)
-    ]
+    chart_note(
+        "Live summary of your customer base from the Supabase database. "
+        "Running Out Soon and Reachout Due are your most actionable numbers — "
+        "these are customers who need to be contacted today."
+    )
 
     def snap(label, value, sub=None, color="#003399"):
         sub_html = f"<div style='font-size:11px;color:{color};font-weight:600;margin-top:4px;'>{sub}</div>" if sub else ""
@@ -157,28 +175,30 @@ def render_customer_intelligence(orders_df):
              f"avg {format_naira(avg_deposit)}/customer", "#003399")
     with k4:
         snap("Running Out Soon", f"{len(running_out_soon):,}",
-             "within 7 days", "#cc0000" if len(running_out_soon) > 10 else "#f0a500")
+             "within 7 days",
+             "#cc0000" if len(running_out_soon) > 10 else "#f0a500")
     with k5:
         snap("Reachout Due", f"{len(reachout_due):,}",
              "today or overdue", "#f0a500")
     with k6:
-        mem_util = (
-            customers_df["membership_deliveries_used"].sum() /
-            customers_df["membership_deliveries_total"].sum() * 100
-            if customers_df["membership_deliveries_total"].sum() > 0 else 0
-        )
         snap("Membership Utilization", f"{mem_util:.1f}%",
              "deliveries used", "#003399")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # SECTION 2 — RUNNING OUT SOON LIST
-    # Most actionable insight — who to call TODAY
+    # SECTION 2 — RUNNING OUT SOON
     # --------------------------------------------------------
     st.markdown(
         "<div class='section-title'>🔴 Customers Running Out This Week — Call Now</div>",
         unsafe_allow_html=True
+    )
+    chart_note(
+        "Customers whose fuel or gas is expected to run out within 7 days. "
+        "This is your highest-priority proactive sales list. "
+        "Calling these customers before they run out increases conversion rate "
+        "because they already know they need to reorder. "
+        "Sorted by Days Until Empty — most urgent shown first."
     )
 
     if not running_out_soon.empty:
@@ -190,15 +210,15 @@ def render_customer_intelligence(orders_df):
             runout_display["run_out_date"] - today
         ).dt.days
         runout_display = runout_display.sort_values("Days Until Empty")
-        runout_display["run_out_date"] = runout_display["run_out_date"].dt.strftime("%d %b %Y")
+        runout_display["run_out_date"]    = runout_display["run_out_date"].dt.strftime("%d %b %Y")
         runout_display["last_bought_date"] = runout_display["last_bought_date"].dt.strftime("%d %b %Y")
         runout_display = runout_display.rename(columns={
-            "name": "Customer",
+            "name":            "Customer",
             "whatsapp_number": "WhatsApp",
-            "customer_type": "Type",
-            "usual_kg": "Usual Qty",
-            "run_out_date": "Runs Out",
-            "last_bought_date": "Last Order"
+            "customer_type":   "Type",
+            "usual_kg":        "Usual Qty",
+            "run_out_date":    "Runs Out",
+            "last_bought_date":"Last Order"
         })
         st.dataframe(runout_display, use_container_width=True, hide_index=True)
     else:
@@ -213,6 +233,13 @@ def render_customer_intelligence(orders_df):
         "<div class='section-title'>📞 Reachout Due Today or Overdue</div>",
         unsafe_allow_html=True
     )
+    chart_note(
+        "Customers whose scheduled follow-up date has passed. "
+        "These are contacts that agents planned to reach out to "
+        "but have not yet done so. "
+        "Days Overdue = how many days past the planned date. "
+        "Longer overdue = higher risk of losing that customer."
+    )
 
     if not reachout_due.empty:
         reachout_display = reachout_due[[
@@ -222,18 +249,22 @@ def render_customer_intelligence(orders_df):
         reachout_display["Days Overdue"] = (
             today - reachout_display["next_reachout_date"]
         ).dt.days
-        reachout_display = reachout_display.sort_values("Days Overdue", ascending=False)
-        reachout_display["next_reachout_date"] = reachout_display["next_reachout_date"].dt.strftime("%d %b %Y")
+        reachout_display = reachout_display.sort_values(
+            "Days Overdue", ascending=False
+        )
+        reachout_display["next_reachout_date"] = reachout_display[
+            "next_reachout_date"
+        ].dt.strftime("%d %b %Y")
         reachout_display["last_bought_date"] = pd.to_datetime(
             reachout_display["last_bought_date"], errors="coerce"
         ).dt.strftime("%d %b %Y")
         reachout_display = reachout_display.rename(columns={
-            "name": "Customer",
-            "whatsapp_number": "WhatsApp",
-            "customer_type": "Type",
+            "name":               "Customer",
+            "whatsapp_number":    "WhatsApp",
+            "customer_type":      "Type",
             "next_reachout_date": "Due Date",
-            "last_bought_date": "Last Order",
-            "owning_agent_id": "Agent"
+            "last_bought_date":   "Last Order",
+            "owning_agent_id":    "Agent"
         })
         st.dataframe(reachout_display, use_container_width=True, hide_index=True)
     else:
@@ -242,7 +273,7 @@ def render_customer_intelligence(orders_df):
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # SECTION 4 — MEMBER VS NON-MEMBER ANALYSIS
+    # SECTION 4 — MEMBER VS NON-MEMBER
     # --------------------------------------------------------
     st.markdown(
         "<div class='section-title'>👑 Member vs Non-Member Analysis</div>",
@@ -252,15 +283,20 @@ def render_customer_intelligence(orders_df):
     col1, col2 = st.columns(2)
 
     with col1:
-        # Member vs Non-member customer count
+        st.markdown(
+            "<div class='section-title'>Customer Count</div>",
+            unsafe_allow_html=True
+        )
+        chart_note(
+            "Split between paying members and non-members. "
+            "A growing member base means more predictable recurring revenue "
+            "and lower churn risk since members have committed upfront."
+        )
+
         member_counts = pd.DataFrame({
             "Status": ["Member", "Non-Member"],
-            "Count": [
-                int(member_customers),
-                int(total_customers - member_customers)
-            ]
+            "Count":  [int(member_customers), int(total_customers - member_customers)]
         })
-
         fig_mem = px.pie(
             member_counts,
             names="Status", values="Count",
@@ -273,24 +309,34 @@ def render_customer_intelligence(orders_df):
             margin=dict(l=5, r=5, t=20, b=5),
             height=280
         )
-        st.markdown(
-            "<div class='section-title'>Customer Count</div>",
-            unsafe_allow_html=True
-        )
         st.plotly_chart(fig_mem, use_container_width=True)
 
     with col2:
-        # Member vs Non-member revenue from orders
+        st.markdown(
+            "<div class='section-title'>Revenue Split</div>",
+            unsafe_allow_html=True
+        )
+        chart_note(
+            "Revenue contribution from members vs non-members. "
+            "If members generate a disproportionately large revenue share, "
+            "the membership programme is working well. "
+            "If non-members dominate revenue, consider incentives "
+            "to convert high-value non-members into members."
+        )
+
         if "Customer Phone" in orders_df.columns:
             member_phones = set(
                 customers_df[customers_df["is_member"] == True][
                     "whatsapp_number"
                 ].astype(str).tolist()
             )
-            orders_df["Is Member"] = orders_df["Customer Phone"].astype(str).isin(member_phones)
+            orders_df["Is Member"] = orders_df[
+                "Customer Phone"
+            ].astype(str).isin(member_phones)
             mem_rev = orders_df.groupby("Is Member")["Revenue"].sum().reset_index()
-            mem_rev["Status"] = mem_rev["Is Member"].map({True: "Member", False: "Non-Member"})
-
+            mem_rev["Status"] = mem_rev["Is Member"].map(
+                {True: "Member", False: "Non-Member"}
+            )
             fig_mem_rev = px.pie(
                 mem_rev,
                 names="Status", values="Revenue",
@@ -298,34 +344,39 @@ def render_customer_intelligence(orders_df):
                 color_discrete_sequence=["#003399", "#ccd9ff"]
             )
             fig_mem_rev.update_traces(
-                textinfo="label+percent",
-                textfont_size=11,
-                text=mem_rev["Revenue"].apply(format_naira)
+                textinfo="label+percent", textfont_size=11
             )
             fig_mem_rev.update_layout(
                 plot_bgcolor="white", paper_bgcolor="white",
                 margin=dict(l=5, r=5, t=20, b=5),
                 height=280
             )
-            st.markdown(
-                "<div class='section-title'>Revenue Split</div>",
-                unsafe_allow_html=True
-            )
             st.plotly_chart(fig_mem_rev, use_container_width=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # SECTION 5 — ACQUISITION CHANNEL BREAKDOWN
+    # SECTION 5 — ACQUISITION CHANNEL + DEPOSIT DISTRIBUTION
     # --------------------------------------------------------
     st.markdown(
-        "<div class='section-title'>📣 Acquisition Channel Breakdown</div>",
+        "<div class='section-title'>📣 Acquisition & Deposit Analysis</div>",
         unsafe_allow_html=True
     )
 
     col3, col4 = st.columns(2)
 
     with col3:
+        st.markdown(
+            "<div class='section-title'>Acquisition Channel Breakdown</div>",
+            unsafe_allow_html=True
+        )
+        chart_note(
+            "How customers first found or joined GasFeel. "
+            "The longest bar is your most effective acquisition channel. "
+            "Invest more in what is working and review channels "
+            "that bring very few customers."
+        )
+
         channel_counts = customers_df[
             customers_df["acquisition_channel"].notna()
         ]["acquisition_channel"].value_counts().reset_index()
@@ -339,7 +390,10 @@ def render_customer_intelligence(orders_df):
                 text="Customers",
                 color_discrete_sequence=["#003399"]
             )
-            fig_channel.update_traces(textposition="outside", textfont_size=10)
+            fig_channel.update_traces(
+                textposition="outside",
+                textfont=dict(size=10, color="#333333")
+            )
             fig_channel.update_layout(
                 plot_bgcolor="white", paper_bgcolor="white",
                 margin=dict(l=5, r=40, t=10, b=5),
@@ -352,29 +406,38 @@ def render_customer_intelligence(orders_df):
             st.info("No acquisition channel data yet.")
 
     with col4:
-        # Deposit balance distribution
-        deposit_customers = customers_df[customers_df["deposit_balance"] > 0]
+        st.markdown(
+            "<div class='section-title'>💰 Deposit Balance Distribution</div>",
+            unsafe_allow_html=True
+        )
+        chart_note(
+            "How deposit balances are distributed across customers. "
+            "Most bars on the left = small deposits typical. "
+            "Bars far right = high-value deposit holders — "
+            "these customers have committed significant funds and "
+            "are highly unlikely to churn."
+        )
 
+        deposit_customers = customers_df[customers_df["deposit_balance"] > 0]
         if not deposit_customers.empty:
             fig_deposit = px.histogram(
                 deposit_customers,
                 x="deposit_balance",
                 nbins=20,
-                color_discrete_sequence=["#003399"],
-                title=""
+                color_discrete_sequence=["#003399"]
             )
             fig_deposit.update_layout(
                 plot_bgcolor="white", paper_bgcolor="white",
                 margin=dict(l=5, r=5, t=10, b=5),
-                xaxis=dict(showgrid=True, gridcolor="#f0f0f0",
-                           title="Deposit Balance (₦)"),
-                yaxis=dict(showgrid=True, gridcolor="#f0f0f0",
-                           title="Number of Customers"),
+                xaxis=dict(
+                    showgrid=True, gridcolor="#f0f0f0",
+                    title="Deposit Balance (₦)"
+                ),
+                yaxis=dict(
+                    showgrid=True, gridcolor="#f0f0f0",
+                    title="Number of Customers"
+                ),
                 height=280
-            )
-            st.markdown(
-                "<div class='section-title'>💰 Deposit Balance Distribution</div>",
-                unsafe_allow_html=True
             )
             st.plotly_chart(fig_deposit, use_container_width=True)
         else:
@@ -383,8 +446,6 @@ def render_customer_intelligence(orders_df):
 
 # ============================================================
 # RETENTION COHORT ANALYSIS
-# For each month cohort of first-time customers,
-# tracks how many are still ordering in subsequent months.
 # ============================================================
 def render_retention_cohort(orders_df):
 
@@ -393,52 +454,46 @@ def render_retention_cohort(orders_df):
         "<div class='section-title'>🔄 Retention Cohort Analysis</div>",
         unsafe_allow_html=True
     )
-    st.markdown("""
-        <p style='color:#666;font-size:13px;margin-bottom:16px;'>
-        Each row shows a cohort of customers who placed their first order
-        in that month. The columns show what % of those customers
-        came back in months 1, 2, 3 etc after their first order.
-        </p>
-    """, unsafe_allow_html=True)
+    chart_note(
+        "Each row is a cohort of customers who placed their FIRST order "
+        "in that month. The columns show what % of those customers "
+        "came back in Month 1, Month 2, Month 3 after their first order. "
+        "100% in Month 0 (the starting month) is always expected. "
+        "Falling numbers to the right show how quickly customers drop off. "
+        "Higher numbers = stronger long-term retention."
+    )
 
-    # --------------------------------------------------------
-    # BUILD COHORT TABLE
-    # --------------------------------------------------------
-
-    # Get each customer's first order date
-    first_orders = orders_df.groupby("Customer Name")["Date of Order"].min().reset_index()
+    # Build cohort table
+    first_orders = df_first = orders_df.groupby(
+        "Customer Name"
+    )["Date of Order"].min().reset_index()
     first_orders.columns = ["Customer Name", "First Order Date"]
     first_orders["Cohort Month"] = first_orders["First Order Date"].dt.to_period("M")
 
-    # Merge back to all orders
     cohort_df = orders_df.merge(first_orders, on="Customer Name")
-    cohort_df["Order Month"] = cohort_df["Date of Order"].dt.to_period("M")
+    cohort_df["Order Month"]   = cohort_df["Date of Order"].dt.to_period("M")
     cohort_df["Period Number"] = (
         cohort_df["Order Month"] - cohort_df["Cohort Month"]
     ).apply(lambda x: x.n)
 
-    # Count unique customers per cohort per period
     cohort_counts = cohort_df.groupby(
         ["Cohort Month", "Period Number"]
     )["Customer Name"].nunique().reset_index()
 
-    # Pivot into cohort table
     cohort_pivot = cohort_counts.pivot(
         index="Cohort Month", columns="Period Number", values="Customer Name"
     )
 
-    # Convert to retention percentages
     cohort_size = cohort_pivot[0]
-    retention = cohort_pivot.divide(cohort_size, axis=0) * 100
+    retention   = cohort_pivot.divide(cohort_size, axis=0) * 100
 
-    # Format for display
     retention_display = retention.copy()
     for col in retention_display.columns:
         retention_display[col] = retention_display[col].apply(
             lambda x: f"{x:.0f}%" if pd.notna(x) else ""
         )
 
-    retention_display.index = retention_display.index.astype(str)
+    retention_display.index   = retention_display.index.astype(str)
     retention_display.columns = [
         f"Month {int(c)}" if c > 0 else "Month 0 (Base)"
         for c in retention_display.columns
@@ -447,11 +502,15 @@ def render_retention_cohort(orders_df):
     st.dataframe(retention_display, use_container_width=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # Heatmap version
     st.markdown(
         "<div class='section-title'>🗺️ Retention Heatmap</div>",
         unsafe_allow_html=True
+    )
+    chart_note(
+        "Same cohort data shown as a colour heatmap. "
+        "Dark blue = high retention. Light = low retention. Empty = no data yet. "
+        "A strong diagonal pattern means customers keep coming back month after month. "
+        "Fading quickly to white means most customers only order once."
     )
 
     retention_vals = retention.copy()
@@ -462,10 +521,10 @@ def render_retention_cohort(orders_df):
         x=[f"M+{int(c)}" for c in retention_vals.columns],
         y=retention_vals.index.tolist(),
         colorscale=[
-            [0, "#fff0f0"],
+            [0,   "#fff0f0"],
             [0.3, "#ccd9ff"],
             [0.6, "#6699ff"],
-            [1, "#003399"]
+            [1,   "#003399"]
         ],
         text=[[f"{v:.0f}%" if pd.notna(v) else "" for v in row]
               for row in retention_vals.values],
@@ -485,22 +544,23 @@ def render_retention_cohort(orders_df):
 
 # ============================================================
 # PRODUCT FREQUENCY DEEP DIVE
-# Average days between orders, early at-risk detection,
-# top vs bottom frequency customers.
 # ============================================================
 def render_product_frequency(orders_df):
+
+    today = pd.Timestamp.now().normalize()
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
         "<div class='section-title'>⏱️ Product Frequency Deep Dive</div>",
         unsafe_allow_html=True
     )
+    chart_note(
+        "How frequently customers reorder. "
+        "Avg Days Between Orders = how long the typical customer waits before reordering. "
+        "Lower = more engaged customers. Higher = customers are spacing out orders "
+        "or buying from competitors between GasFeel orders."
+    )
 
-    today = pd.Timestamp.now().normalize()
-
-    # --------------------------------------------------------
-    # CALCULATE DAYS BETWEEN ORDERS PER CUSTOMER
-    # --------------------------------------------------------
     customer_orders = orders_df.sort_values(
         ["Customer Name", "Date of Order"]
     ).groupby("Customer Name").agg(
@@ -511,12 +571,9 @@ def render_product_frequency(orders_df):
         Products=("Order Type", lambda x: x.mode()[0] if len(x) > 0 else "Unknown")
     ).reset_index()
 
-    # Days since last order
     customer_orders["Days Since Last Order"] = (
         today - customer_orders["Last_Order"]
     ).dt.days
-
-    # Average days between orders
     customer_orders["Tenure Days"] = (
         customer_orders["Last_Order"] - customer_orders["First_Order"]
     ).dt.days
@@ -525,11 +582,7 @@ def render_product_frequency(orders_df):
         (customer_orders["Total_Orders"] - 1)
     ).where(customer_orders["Total_Orders"] > 1, None).round(1)
 
-    # --------------------------------------------------------
-    # EARLY AT-RISK DETECTION
-    # Customers who haven't ordered in 14+ days
-    # but are not yet in the 30-day churn threshold
-    # --------------------------------------------------------
+    # Early at-risk: 14-30 days silent
     early_risk = customer_orders[
         (customer_orders["Days Since Last Order"] >= 14) &
         (customer_orders["Days Since Last Order"] < 30)
@@ -537,15 +590,15 @@ def render_product_frequency(orders_df):
 
     col1, col2, col3 = st.columns(3)
 
+    avg_days = customer_orders[
+        customer_orders["Avg Days Between Orders"].notna()
+    ]["Avg Days Between Orders"].mean()
+
     with col1:
-        avg_days_between = customer_orders[
-            customer_orders["Avg Days Between Orders"].notna()
-        ]["Avg Days Between Orders"].mean()
         st.metric(
             label="Avg Days Between Orders",
-            value=f"{avg_days_between:.1f} days" if pd.notna(avg_days_between) else "N/A"
+            value=f"{avg_days:.1f} days" if pd.notna(avg_days) else "N/A"
         )
-
     with col2:
         st.metric(
             label="Early At-Risk (14-30 days)",
@@ -553,26 +606,28 @@ def render_product_frequency(orders_df):
             delta=f"-{len(early_risk)} need attention",
             delta_color="inverse"
         )
-
     with col3:
-        repeat_customers = customer_orders[
-            customer_orders["Total_Orders"] > 1
-        ]
+        repeat = customer_orders[customer_orders["Total_Orders"] > 1]
         st.metric(
             label="Repeat Customers",
-            value=f"{len(repeat_customers):,}",
-            delta=f"{(len(repeat_customers)/len(customer_orders)*100):.1f}% of base"
+            value=f"{len(repeat):,}",
+            delta=f"{(len(repeat)/len(customer_orders)*100):.1f}% of base"
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # EARLY AT-RISK TABLE
-    # --------------------------------------------------------
+    # Early At-Risk Table
     if not early_risk.empty:
         st.markdown(
             "<div class='section-title'>⚠️ Early At-Risk Customers (14-30 Days Silent)</div>",
             unsafe_allow_html=True
+        )
+        chart_note(
+            "Customers who have not ordered in 14-30 days. "
+            "They are not yet in the official 'At Risk' category (30 days) "
+            "but are showing early signs of disengagement. "
+            "A proactive call now is much easier than a re-engagement "
+            "campaign after they have fully churned."
         )
         early_display = early_risk[[
             "Customer Name", "Days Since Last Order",
@@ -580,21 +635,21 @@ def render_product_frequency(orders_df):
         ]].copy()
         early_display["Total_Revenue"] = early_display["Total_Revenue"].apply(format_naira)
         early_display = early_display.rename(columns={
-            "Customer Name": "Customer",
-            "Days Since Last Order": "Days Silent",
-            "Total_Orders": "Total Orders",
-            "Total_Revenue": "Total Revenue",
-            "Products": "Main Product"
+            "Customer Name":        "Customer",
+            "Days Since Last Order":"Days Silent",
+            "Total_Orders":         "Total Orders",
+            "Total_Revenue":        "Total Revenue",
+            "Products":             "Main Product"
         })
-        st.dataframe(early_display, use_container_width=True, hide_index=True, height=280)
+        st.dataframe(
+            early_display, use_container_width=True,
+            hide_index=True, height=280
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # TOP VS BOTTOM FREQUENCY CUSTOMERS
-    # --------------------------------------------------------
+    # Top vs Bottom Frequency
     col3, col4 = st.columns(2)
-
     freq_customers = customer_orders[
         customer_orders["Avg Days Between Orders"].notna()
     ].copy()
@@ -604,16 +659,22 @@ def render_product_frequency(orders_df):
             "<div class='section-title'>🏆 Most Frequent Customers</div>",
             unsafe_allow_html=True
         )
+        chart_note(
+            "Customers with the shortest average time between orders. "
+            "These are your most loyal and engaged customers. "
+            "They deserve priority service, loyalty rewards, "
+            "and first access to promotions."
+        )
         top_freq = freq_customers.nsmallest(10, "Avg Days Between Orders")[[
             "Customer Name", "Avg Days Between Orders",
             "Total_Orders", "Total_Revenue"
         ]].copy()
         top_freq["Total_Revenue"] = top_freq["Total_Revenue"].apply(format_naira)
         top_freq = top_freq.rename(columns={
-            "Customer Name": "Customer",
+            "Customer Name":           "Customer",
             "Avg Days Between Orders": "Avg Days Between Orders",
-            "Total_Orders": "Orders",
-            "Total_Revenue": "Revenue"
+            "Total_Orders":            "Orders",
+            "Total_Revenue":           "Revenue"
         })
         st.dataframe(top_freq, use_container_width=True, hide_index=True)
 
@@ -622,27 +683,38 @@ def render_product_frequency(orders_df):
             "<div class='section-title'>📉 Least Frequent Customers</div>",
             unsafe_allow_html=True
         )
+        chart_note(
+            "Customers with the longest average gap between orders. "
+            "They may be using GasFeel only occasionally or "
+            "splitting orders between GasFeel and competitors. "
+            "Target these customers with frequency incentives — "
+            "discounts for ordering twice in one week for example."
+        )
         bottom_freq = freq_customers.nlargest(10, "Avg Days Between Orders")[[
             "Customer Name", "Avg Days Between Orders",
             "Total_Orders", "Total_Revenue"
         ]].copy()
         bottom_freq["Total_Revenue"] = bottom_freq["Total_Revenue"].apply(format_naira)
         bottom_freq = bottom_freq.rename(columns={
-            "Customer Name": "Customer",
+            "Customer Name":           "Customer",
             "Avg Days Between Orders": "Avg Days Between Orders",
-            "Total_Orders": "Orders",
-            "Total_Revenue": "Revenue"
+            "Total_Orders":            "Orders",
+            "Total_Revenue":           "Revenue"
         })
         st.dataframe(bottom_freq, use_container_width=True, hide_index=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # ORDER FREQUENCY DISTRIBUTION CHART
-    # --------------------------------------------------------
+    # Order Frequency Distribution
     st.markdown(
         "<div class='section-title'>📊 Order Frequency Distribution</div>",
         unsafe_allow_html=True
+    )
+    chart_note(
+        "How many customers have placed 1, 2, 3, 4+ orders in total. "
+        "A tall bar at 1 means most customers only ordered once — "
+        "a retention problem. Growing bars at 3, 4, 5+ means "
+        "customers are becoming loyal repeat buyers."
     )
 
     freq_dist = customer_orders["Total_Orders"].value_counts().reset_index()
@@ -656,7 +728,10 @@ def render_product_frequency(orders_df):
         text="Customers",
         color_discrete_sequence=["#003399"]
     )
-    fig_dist.update_traces(textposition="outside", textfont_size=10)
+    fig_dist.update_traces(
+        textposition="outside",
+        textfont=dict(size=10, color="#333333")
+    )
     fig_dist.update_layout(
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=5, r=5, t=10, b=5),
@@ -664,7 +739,10 @@ def render_product_frequency(orders_df):
             showgrid=False, title="Number of Orders",
             tickmode="linear"
         ),
-        yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title="Number of Customers"),
+        yaxis=dict(
+            showgrid=True, gridcolor="#f0f0f0",
+            title="Number of Customers"
+        ),
         height=300
     )
     st.plotly_chart(fig_dist, use_container_width=True)
