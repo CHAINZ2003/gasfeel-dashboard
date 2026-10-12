@@ -444,9 +444,6 @@ def render_customer_intelligence(orders_df):
             st.info("No deposit balance data yet.")
 
 
-# ============================================================
-# RETENTION COHORT ANALYSIS
-# ============================================================
 def render_retention_cohort(orders_df):
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -455,19 +452,23 @@ def render_retention_cohort(orders_df):
         unsafe_allow_html=True
     )
     chart_note(
-        "Each row is a cohort of customers who placed their FIRST order "
-        "in that month. The columns show what % of those customers "
-        "came back in Month 1, Month 2, Month 3 after their first order. "
-        "100% in Month 0 (the starting month) is always expected. "
-        "Falling numbers to the right show how quickly customers drop off. "
+        "Each row is a group of customers who placed their FIRST ever order "
+        "in that month — called a cohort. "
+        "The columns show how many of those customers came back "
+        "in Month 1, Month 2, Month 3 after their first order. "
+        "Month 0 always shows 100% because that is when they first ordered. "
+        "Read it like this: 'Of the 45 customers who first ordered in January, "
+        "28 (62%) came back in February, and 19 (42%) came back in March.' "
         "Higher numbers = stronger long-term retention."
     )
 
-    # Build cohort table
-    first_orders = df_first = orders_df.groupby(
+    # --------------------------------------------------------
+    # BUILD COHORT DATA
+    # --------------------------------------------------------
+    first_orders = orders_df.groupby(
         "Customer Name"
     )["Date of Order"].min().reset_index()
-    first_orders.columns = ["Customer Name", "First Order Date"]
+    first_orders.columns   = ["Customer Name", "First Order Date"]
     first_orders["Cohort Month"] = first_orders["First Order Date"].dt.to_period("M")
 
     cohort_df = orders_df.merge(first_orders, on="Customer Name")
@@ -479,46 +480,111 @@ def render_retention_cohort(orders_df):
     cohort_counts = cohort_df.groupby(
         ["Cohort Month", "Period Number"]
     )["Customer Name"].nunique().reset_index()
+    cohort_counts.columns = ["Cohort Month", "Period", "Customers"]
 
     cohort_pivot = cohort_counts.pivot(
-        index="Cohort Month", columns="Period Number", values="Customer Name"
+        index="Cohort Month", columns="Period", values="Customers"
     )
 
-    cohort_size = cohort_pivot[0]
-    retention   = cohort_pivot.divide(cohort_size, axis=0) * 100
+    cohort_size   = cohort_pivot[0]
+    retention_pct = cohort_pivot.divide(cohort_size, axis=0) * 100
 
-    retention_display = retention.copy()
-    for col in retention_display.columns:
-        retention_display[col] = retention_display[col].apply(
-            lambda x: f"{x:.0f}%" if pd.notna(x) else ""
-        )
+    # --------------------------------------------------------
+    # DESCRIPTIVE TABLE — Numbers + % in each cell
+    # --------------------------------------------------------
+    st.markdown(
+        "<div class='section-title'>📋 Month-on-Month Retention Table</div>",
+        unsafe_allow_html=True
+    )
+    chart_note(
+        "Each cell shows: number of customers who returned / total in cohort (%). "
+        "Example: '28/45 (62%)' means 28 out of 45 first-time customers "
+        "from that month came back. "
+        "Empty cells mean not enough time has passed yet."
+    )
 
-    retention_display.index   = retention_display.index.astype(str)
-    retention_display.columns = [
-        f"Month {int(c)}" if c > 0 else "Month 0 (Base)"
-        for c in retention_display.columns
-    ]
+    descriptive_rows = []
+    for cohort_month in cohort_pivot.index:
+        row = {"Cohort Month": str(cohort_month)}
+        cohort_total = int(cohort_size[cohort_month])
+        row["Cohort Size"] = f"{cohort_total} customers"
 
-    st.dataframe(retention_display, width="stretch")
+        for period in cohort_pivot.columns:
+            count = cohort_pivot.loc[cohort_month, period]
+            pct   = retention_pct.loc[cohort_month, period]
+            if pd.notna(count):
+                count = int(count)
+                if period == 0:
+                    row[f"Month 0 (Start)"] = f"{count} (100%)"
+                else:
+                    row[f"Month +{int(period)}"] = f"{count}/{cohort_total} ({pct:.0f}%)"
+            else:
+                if period == 0:
+                    row["Month 0 (Start)"] = ""
+                else:
+                    row[f"Month +{int(period)}"] = ""
+
+        descriptive_rows.append(row)
+
+    descriptive_df = pd.DataFrame(descriptive_rows)
+    descriptive_df = descriptive_df.set_index("Cohort Month")
+
+    st.dataframe(descriptive_df, use_container_width=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
+
+    # --------------------------------------------------------
+    # HEATMAP — Visual version
+    # --------------------------------------------------------
     st.markdown(
         "<div class='section-title'>🗺️ Retention Heatmap</div>",
         unsafe_allow_html=True
     )
     chart_note(
-        "Same cohort data shown as a colour heatmap. "
-        "Dark blue = high retention. Light = low retention. Empty = no data yet. "
-        "A strong diagonal pattern means customers keep coming back month after month. "
-        "Fading quickly to white means most customers only order once."
+        "Same data shown as a colour heatmap. "
+        "Each cell shows the retention % and the actual customer count. "
+        "Dark blue = strong retention. Light = weak. Empty = no data yet. "
+        "Read each row left to right — this shows how quickly "
+        "customers from each month stopped coming back."
     )
 
-    retention_vals = retention.copy()
+    retention_vals = retention_pct.copy()
     retention_vals.index = retention_vals.index.astype(str)
+
+    # Build hover text with both count and percentage
+    hover_text = []
+    for cohort_month in cohort_pivot.index:
+        row_text = []
+        cohort_total = int(cohort_size[cohort_month])
+        for period in cohort_pivot.columns:
+            count = cohort_pivot.loc[cohort_month, period]
+            pct   = retention_pct.loc[cohort_month, period]
+            if pd.notna(count):
+                row_text.append(
+                    f"{int(count)} of {cohort_total} customers ({pct:.0f}%)"
+                )
+            else:
+                row_text.append("")
+        hover_text.append(row_text)
+
+    # Cell labels showing both count and %
+    cell_labels = []
+    for cohort_month in cohort_pivot.index:
+        row_labels = []
+        cohort_total = int(cohort_size[cohort_month])
+        for period in cohort_pivot.columns:
+            count = cohort_pivot.loc[cohort_month, period]
+            pct   = retention_pct.loc[cohort_month, period]
+            if pd.notna(count):
+                row_labels.append(f"{int(count)}\n({pct:.0f}%)")
+            else:
+                row_labels.append("")
+        cell_labels.append(row_labels)
 
     fig_heat = go.Figure(data=go.Heatmap(
         z=retention_vals.values,
-        x=[f"M+{int(c)}" for c in retention_vals.columns],
+        x=[f"Month 0 (Start)" if c == 0 else f"Month +{int(c)}"
+           for c in retention_vals.columns],
         y=retention_vals.index.tolist(),
         colorscale=[
             [0,   "#fff0f0"],
@@ -526,10 +592,11 @@ def render_retention_cohort(orders_df):
             [0.6, "#6699ff"],
             [1,   "#003399"]
         ],
-        text=[[f"{v:.0f}%" if pd.notna(v) else "" for v in row]
-              for row in retention_vals.values],
+        text=cell_labels,
         texttemplate="%{text}",
-        textfont=dict(size=11, color="white"),
+        textfont=dict(size=10, color="white"),
+        hovertext=hover_text,
+        hovertemplate="%{hovertext}<extra></extra>",
         showscale=True
     ))
     fig_heat.update_layout(
@@ -537,10 +604,146 @@ def render_retention_cohort(orders_df):
         margin=dict(l=10, r=10, t=20, b=10),
         xaxis=dict(title="Months Since First Order"),
         yaxis=dict(title="Cohort Month"),
-        height=350
+        height=400
     )
-    st.plotly_chart(fig_heat, width="stretch")
+    st.plotly_chart(fig_heat, use_container_width=True)
 
+    # --------------------------------------------------------
+    # WEEK BY WEEK RETENTION TABLE
+    # --------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-title'>📅 Week-by-Week Retention Table</div>",
+        unsafe_allow_html=True
+    )
+    chart_note(
+        "Same cohort analysis but broken down by week instead of month. "
+        "Each row = customers who ordered for the FIRST time in that week. "
+        "Each column shows how many came back in Week +1, Week +2 etc. "
+        "Read it like: '12/20 (60%) means 12 out of 20 customers "
+        "who first ordered in that week came back the following week.' "
+        "Use this for faster feedback on retention trends than monthly view."
+    )
+
+    # Build weekly cohort
+    first_orders_wk = orders_df.groupby(
+        "Customer Name"
+    )["Date of Order"].min().reset_index()
+    first_orders_wk.columns = ["Customer Name", "First Order Date"]
+    first_orders_wk["Cohort Week"] = first_orders_wk[
+        "First Order Date"
+    ].dt.to_period("W")
+
+    cohort_wk = orders_df.merge(first_orders_wk, on="Customer Name")
+    cohort_wk["Order Week"]     = cohort_wk["Date of Order"].dt.to_period("W")
+    cohort_wk["Period Number"]  = (
+        cohort_wk["Order Week"] - cohort_wk["Cohort Week"]
+    ).apply(lambda x: x.n)
+
+    # Only keep up to Week +8 to keep table readable
+    cohort_wk = cohort_wk[cohort_wk["Period Number"] <= 8]
+
+    wk_counts = cohort_wk.groupby(
+        ["Cohort Week", "Period Number"]
+    )["Customer Name"].nunique().reset_index()
+    wk_counts.columns = ["Cohort Week", "Period", "Customers"]
+
+    wk_pivot = wk_counts.pivot(
+        index="Cohort Week", columns="Period", values="Customers"
+    )
+
+    wk_size   = wk_pivot[0]
+    wk_pct    = wk_pivot.divide(wk_size, axis=0) * 100
+
+    # Build descriptive weekly table
+    wk_rows = []
+    for cohort_week in wk_pivot.index:
+        row = {
+            "Cohort Week": str(cohort_week),
+            "Cohort Size": f"{int(wk_size[cohort_week])} customers"
+        }
+        total = int(wk_size[cohort_week])
+        for period in wk_pivot.columns:
+            count = wk_pivot.loc[cohort_week, period]
+            pct   = wk_pct.loc[cohort_week, period]
+            if pd.notna(count):
+                count = int(count)
+                if period == 0:
+                    row["Week 0 (First Order)"] = f"{count} (100%)"
+                else:
+                    row[f"Week +{int(period)}"] = f"{count}/{total} ({pct:.0f}%)"
+            else:
+                if period == 0:
+                    row["Week 0 (First Order)"] = ""
+                else:
+                    row[f"Week +{int(period)}"] = ""
+        wk_rows.append(row)
+
+    wk_display = pd.DataFrame(wk_rows).set_index("Cohort Week")
+
+    # Only show last 12 weeks to keep readable
+    wk_display = wk_display.tail(12)
+
+    st.dataframe(wk_display, use_container_width=True)
+
+    # --------------------------------------------------------
+    # WEEK BY WEEK HEATMAP
+    # --------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-title'>🗺️ Weekly Retention Heatmap</div>",
+        unsafe_allow_html=True
+    )
+    chart_note(
+        "Visual version of the weekly cohort table. "
+        "Each cell shows customer count and retention %. "
+        "Dark blue = strong week-on-week retention. "
+        "Fading quickly = customers are not coming back the following week. "
+        "Consistent dark blue across a row = highly loyal cohort."
+    )
+
+    wk_vals = wk_pct.copy()
+    wk_vals.index = wk_vals.index.astype(str)
+    wk_vals = wk_vals.tail(12)
+    wk_pivot_disp = wk_pivot.loc[wk_pivot.index[-12:]] if len(wk_pivot) > 12 else wk_pivot
+
+    wk_cell_labels = []
+    for cohort_week in wk_pivot_disp.index:
+        row_labels = []
+        total = int(wk_size[cohort_week])
+        for period in wk_pivot_disp.columns:
+            count = wk_pivot_disp.loc[cohort_week, period]
+            pct   = wk_pct.loc[cohort_week, period]
+            if pd.notna(count):
+                row_labels.append(f"{int(count)}\n({pct:.0f}%)")
+            else:
+                row_labels.append("")
+        wk_cell_labels.append(row_labels)
+
+    fig_wk_heat = go.Figure(data=go.Heatmap(
+        z=wk_vals.values,
+        x=["Week 0 (First)" if c == 0 else f"Week +{int(c)}"
+           for c in wk_vals.columns],
+        y=wk_vals.index.tolist(),
+        colorscale=[
+            [0,   "#fff0f0"],
+            [0.3, "#ccd9ff"],
+            [0.6, "#6699ff"],
+            [1,   "#003399"]
+        ],
+        text=wk_cell_labels,
+        texttemplate="%{text}",
+        textfont=dict(size=10, color="white"),
+        showscale=True
+    ))
+    fig_wk_heat.update_layout(
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=10, r=10, t=20, b=10),
+        xaxis=dict(title="Weeks Since First Order"),
+        yaxis=dict(title="Cohort Week"),
+        height=420
+    )
+    st.plotly_chart(fig_wk_heat, use_container_width=True)
 
 # ============================================================
 # PRODUCT FREQUENCY DEEP DIVE
