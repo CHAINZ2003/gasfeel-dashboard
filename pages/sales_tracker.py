@@ -13,18 +13,16 @@ from datetime import timedelta
 # ============================================================
 # HELPER — FORMAT NAIRA VALUES
 # ============================================================
+# ============================================================
+# HELPER — FORMAT NAIRA VALUES (Full Numbers)
+# ============================================================
 def format_naira(value):
     try:
         if pd.isna(value) or value == 0:
             return "₦0"
     except:
         return "₦0"
-    if value >= 1_000_000:
-        return f"₦{value/1_000_000:.2f}M"
-    elif value >= 1_000:
-        return f"₦{value/1_000:.2f}K"
-    else:
-        return f"₦{value:,.0f}"
+    return f"₦{value:,.0f}"
 
 
 # ============================================================
@@ -376,6 +374,6 @@ def render_sales_tracker(df, targets):
                            title="", tickfont=dict(color="#333333")),
                 showlegend=False, height=300
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No data available for revenue trend.")

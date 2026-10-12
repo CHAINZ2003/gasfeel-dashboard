@@ -220,7 +220,7 @@ def render_customer_intelligence(orders_df):
             "run_out_date":    "Runs Out",
             "last_bought_date":"Last Order"
         })
-        st.dataframe(runout_display, use_container_width=True, hide_index=True)
+        st.dataframe(runout_display, width="stretch", hide_index=True)
     else:
         st.success("No customers running out in the next 7 days.")
 
@@ -266,7 +266,7 @@ def render_customer_intelligence(orders_df):
             "last_bought_date":   "Last Order",
             "owning_agent_id":    "Agent"
         })
-        st.dataframe(reachout_display, use_container_width=True, hide_index=True)
+        st.dataframe(reachout_display, width="stretch", hide_index=True)
     else:
         st.success("No reachouts overdue today.")
 
@@ -309,7 +309,7 @@ def render_customer_intelligence(orders_df):
             margin=dict(l=5, r=5, t=20, b=5),
             height=280
         )
-        st.plotly_chart(fig_mem, use_container_width=True)
+        st.plotly_chart(fig_mem, width="stretch")
 
     with col2:
         st.markdown(
@@ -351,7 +351,7 @@ def render_customer_intelligence(orders_df):
                 margin=dict(l=5, r=5, t=20, b=5),
                 height=280
             )
-            st.plotly_chart(fig_mem_rev, use_container_width=True)
+            st.plotly_chart(fig_mem_rev, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -401,7 +401,7 @@ def render_customer_intelligence(orders_df):
                 yaxis=dict(showgrid=False, title=""),
                 height=280
             )
-            st.plotly_chart(fig_channel, use_container_width=True)
+            st.plotly_chart(fig_channel, width="stretch")
         else:
             st.info("No acquisition channel data yet.")
 
@@ -439,7 +439,7 @@ def render_customer_intelligence(orders_df):
                 ),
                 height=280
             )
-            st.plotly_chart(fig_deposit, use_container_width=True)
+            st.plotly_chart(fig_deposit, width="stretch")
         else:
             st.info("No deposit balance data yet.")
 
@@ -499,7 +499,7 @@ def render_retention_cohort(orders_df):
         for c in retention_display.columns
     ]
 
-    st.dataframe(retention_display, use_container_width=True)
+    st.dataframe(retention_display, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
@@ -539,7 +539,7 @@ def render_retention_cohort(orders_df):
         yaxis=dict(title="Cohort Month"),
         height=350
     )
-    st.plotly_chart(fig_heat, use_container_width=True)
+    st.plotly_chart(fig_heat, width="stretch")
 
 
 # ============================================================
@@ -642,7 +642,7 @@ def render_product_frequency(orders_df):
             "Products":             "Main Product"
         })
         st.dataframe(
-            early_display, use_container_width=True,
+            early_display, width="stretch",
             hide_index=True, height=280
         )
 
@@ -676,7 +676,7 @@ def render_product_frequency(orders_df):
             "Total_Orders":            "Orders",
             "Total_Revenue":           "Revenue"
         })
-        st.dataframe(top_freq, use_container_width=True, hide_index=True)
+        st.dataframe(top_freq, width="stretch", hide_index=True)
 
     with col4:
         st.markdown(
@@ -701,7 +701,7 @@ def render_product_frequency(orders_df):
             "Total_Orders":            "Orders",
             "Total_Revenue":           "Revenue"
         })
-        st.dataframe(bottom_freq, use_container_width=True, hide_index=True)
+        st.dataframe(bottom_freq, width="stretch", hide_index=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -745,4 +745,4 @@ def render_product_frequency(orders_df):
         ),
         height=300
     )
-    st.plotly_chart(fig_dist, use_container_width=True)
+    st.plotly_chart(fig_dist, width="stretch")

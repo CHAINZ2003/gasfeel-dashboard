@@ -237,7 +237,7 @@ def render_agent(filtered_df):
                 "Commission (₦)": "₦{:,.0f}",
                 "Conv %":         "{:.1f}%"
             }),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=320
         )
@@ -286,7 +286,7 @@ def render_agent(filtered_df):
             showlegend=True,
             height=320
         )
-        st.plotly_chart(fig_outcome, use_container_width=True)
+        st.plotly_chart(fig_outcome, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -335,7 +335,7 @@ def render_agent(filtered_df):
             yaxis=dict(showgrid=False, title=""),
             height=320
         )
-        st.plotly_chart(fig_conv, use_container_width=True)
+        st.plotly_chart(fig_conv, width="stretch")
 
     with col4:
         st.markdown(
@@ -389,7 +389,7 @@ def render_agent(filtered_df):
             ),
             height=320
         )
-        st.plotly_chart(fig_weekly, use_container_width=True)
+        st.plotly_chart(fig_weekly, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -430,7 +430,7 @@ def render_agent(filtered_df):
             yaxis=dict(showgrid=False, title=""),
             height=320
         )
-        st.plotly_chart(fig_rev, use_container_width=True)
+        st.plotly_chart(fig_rev, width="stretch")
 
     with col6:
         st.markdown(
@@ -464,7 +464,7 @@ def render_agent(filtered_df):
             yaxis=dict(showgrid=False, title=""),
             height=320
         )
-        st.plotly_chart(fig_comm, use_container_width=True)
+        st.plotly_chart(fig_comm, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -501,6 +501,6 @@ def render_agent(filtered_df):
             "Agent", "Total Interactions", "Sales Closed",
             "Conversion Rate", "Revenue Generated", "Commission Earned"
         ]],
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )

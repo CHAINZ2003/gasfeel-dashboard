@@ -175,7 +175,7 @@ def render_customer(df):
             yaxis=dict(showgrid=False, title=""),
             height=300
         )
-        st.plotly_chart(fig_top, use_container_width=True)
+        st.plotly_chart(fig_top, width="stretch")
 
     # ---- CHART 2: Customer Status ----
     with row1_mid:
@@ -222,7 +222,7 @@ def render_customer(df):
             showlegend=False,
             height=300
         )
-        st.plotly_chart(fig_status, use_container_width=True)
+        st.plotly_chart(fig_status, width="stretch")
 
     # ---- CHART 3: Highest Avg Order Value ----
     with row1_right:
@@ -266,7 +266,7 @@ def render_customer(df):
             yaxis=dict(showgrid=False, title=""),
             height=300
         )
-        st.plotly_chart(fig_high, use_container_width=True)
+        st.plotly_chart(fig_high, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -316,7 +316,7 @@ def render_customer(df):
             yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title=""),
             height=280
         )
-        st.plotly_chart(fig_ltv, use_container_width=True)
+        st.plotly_chart(fig_ltv, width="stretch")
 
     # ---- CHART 5: Customer Distribution by Order Size ----
     with row2_right:
@@ -378,7 +378,7 @@ def render_customer(df):
             yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title=""),
             height=280
         )
-        st.plotly_chart(fig_size, use_container_width=True)
+        st.plotly_chart(fig_size, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -462,7 +462,7 @@ def render_customer(df):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=320
     )
-    st.plotly_chart(fig_status_monthly, use_container_width=True)
+    st.plotly_chart(fig_status_monthly, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -573,7 +573,7 @@ def render_customer(df):
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             height=350
         )
-        st.plotly_chart(fig_area_stack, use_container_width=True)
+        st.plotly_chart(fig_area_stack, width="stretch")
 
     with col_churn2:
         st.markdown(
@@ -613,7 +613,7 @@ def render_customer(df):
             yaxis=dict(showgrid=False, title="", tickfont=dict(color="#333333")),
             height=350
         )
-        st.plotly_chart(fig_churn, use_container_width=True)
+        st.plotly_chart(fig_churn, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -660,7 +660,7 @@ def render_customer(df):
             "Area", "Total Customers", "Active",
             "At Risk", "Churned", "Churn Rate %", "Retention Rate %"
         ]],
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
 
@@ -718,7 +718,7 @@ def render_customer(df):
                 "Customer", "Last Order",
                 "Days Since Last Order", "Orders", "Revenue"
             ]],
-            use_container_width=True, hide_index=True, height=400
+            width="stretch", hide_index=True, height=400
         )
 
     with col_risk:
@@ -737,7 +737,7 @@ def render_customer(df):
                 "Customer", "Last Order",
                 "Days Since Last Order", "Orders", "Revenue"
             ]],
-            use_container_width=True, hide_index=True, height=400
+            width="stretch", hide_index=True, height=400
         )
 
     with col_churned:
@@ -756,5 +756,5 @@ def render_customer(df):
                 "Customer", "Last Order",
                 "Days Since Last Order", "Orders", "Revenue"
             ]],
-            use_container_width=True, hide_index=True, height=400
+            width="stretch", hide_index=True, height=400
         )

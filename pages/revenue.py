@@ -15,18 +15,16 @@ import pandas as pd
 # ============================================================
 # HELPER — FORMAT NAIRA VALUES
 # ============================================================
+# ============================================================
+# HELPER — FORMAT NAIRA VALUES (Full Numbers)
+# ============================================================
 def format_naira(value):
     try:
         if pd.isna(value) or value == 0:
             return "₦0"
     except:
         return "₦0"
-    if value >= 1_000_000:
-        return f"₦{value/1_000_000:.2f}M"
-    elif value >= 1_000:
-        return f"₦{value/1_000:.2f}K"
-    else:
-        return f"₦{value:,.0f}"
+    return f"₦{value:,.0f}"
 
 
 # ============================================================
@@ -92,9 +90,9 @@ def render_revenue(df):
         kpi_card("Delivery Cost", format_naira(total_delivery_cost))
         kpi_card("Profit", format_naira(total_profit))
 
-        margin_color = "kpi-positive" if profit_margin >= 0 else "kpi-negative"
-        margin_str   = f"▲{profit_margin:.1f}%" if profit_margin >= 0 else f"▼{abs(profit_margin):.1f}%"
-        kpi_card("Profit Margin", margin_str, color=margin_color)
+        margin_color = "green" if profit_margin >= 0 else "red"
+        margin_str   = f"<span style='color:{margin_color};'>▲{profit_margin:.1f}%</span>" if profit_margin >= 0 else f"<span style='color:{margin_color};'>▼{abs(profit_margin):.1f}%</span>"
+        kpi_card("Profit Margin", margin_str)
         kpi_card("Delivery Profit", format_naira(delivery_profit))
 
     with col_charts:
@@ -145,7 +143,7 @@ def render_revenue(df):
                 yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title=""),
                 height=220
             )
-            st.plotly_chart(fig_day, use_container_width=True)
+            st.plotly_chart(fig_day, width="stretch")
 
         # ---- CHART 2: Revenue by Product Type ----
         with row1_right:
@@ -180,7 +178,7 @@ def render_revenue(df):
                 legend=dict(orientation="v", x=1, y=0.5),
                 height=220
             )
-            st.plotly_chart(fig_product, use_container_width=True)
+            st.plotly_chart(fig_product, width="stretch")
 
         row2_left, row2_right = st.columns(2)
 
@@ -219,7 +217,7 @@ def render_revenue(df):
                 yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title=""),
                 height=250
             )
-            st.plotly_chart(fig_area, use_container_width=True)
+            st.plotly_chart(fig_area, width="stretch")
 
         # ---- CHART 4: Revenue by Station ----
         with row2_right:
@@ -257,7 +255,7 @@ def render_revenue(df):
                 yaxis=dict(showgrid=False, title=""),
                 height=250
             )
-            st.plotly_chart(fig_station, use_container_width=True)
+            st.plotly_chart(fig_station, width="stretch")
 
     # --------------------------------------------------------
     # PRODUCT REVENUE BY MONTH — Stacked Bar
@@ -317,4 +315,4 @@ def render_revenue(df):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=320
     )
-    st.plotly_chart(fig_product_monthly, use_container_width=True)
+    st.plotly_chart(fig_product_monthly, width="stretch")

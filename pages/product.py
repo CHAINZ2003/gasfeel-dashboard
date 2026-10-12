@@ -155,7 +155,7 @@ def render_product(df):
             yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title="Litres / Kg"),
             height=230
         )
-        st.plotly_chart(fig_vol, use_container_width=True)
+        st.plotly_chart(fig_vol, width="stretch")
 
     # ---- CHART 2: Product Demand by Area ----
     with row1_right:
@@ -193,7 +193,7 @@ def render_product(df):
             yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title=""),
             height=230
         )
-        st.plotly_chart(fig_demand, use_container_width=True)
+        st.plotly_chart(fig_demand, width="stretch")
 
     # --------------------------------------------------------
     # ROW 3 — Product Revenue | Avg Orders/Customer | Reorder Rate
@@ -229,7 +229,7 @@ def render_product(df):
             showlegend=False,
             height=250
         )
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.plotly_chart(fig_donut, width="stretch")
 
     # ---- CHART 4: Avg Orders per Customer by Week ----
     with row2_mid:
@@ -278,7 +278,7 @@ def render_product(df):
             yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title=""),
             height=250
         )
-        st.plotly_chart(fig_avg, use_container_width=True)
+        st.plotly_chart(fig_avg, width="stretch")
 
     # ---- CHART 5: Reorder Rate % by Month ----
     with row2_right:
@@ -329,7 +329,7 @@ def render_product(df):
             yaxis=dict(showgrid=False, title="", autorange="reversed"),
             height=250
         )
-        st.plotly_chart(fig_reorder, use_container_width=True)
+        st.plotly_chart(fig_reorder, width="stretch")
 
     # ============================================================
     # PETROL CUSTOMER RETENTION — Weekly Rolling Analysis
@@ -517,7 +517,7 @@ def render_product(df):
             ),
             height=300
         )
-        st.plotly_chart(fig_ret, use_container_width=True)
+        st.plotly_chart(fig_ret, width="stretch")
 
     with chart_col2:
         st.markdown(
@@ -573,7 +573,7 @@ def render_product(df):
             ),
             height=300
         )
-        st.plotly_chart(fig_stack, use_container_width=True)
+        st.plotly_chart(fig_stack, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
@@ -601,4 +601,4 @@ def render_product(df):
         "New":            "New This Week",
         "Retention %":    "Retention Rate"
     })
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.dataframe(display_df, width="stretch", hide_index=True)

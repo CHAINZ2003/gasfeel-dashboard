@@ -137,8 +137,39 @@ def clean_and_enrich(df):
                 errors="coerce"
             )
 
-    # Remove zero or null revenue rows
-    df = df[df["Revenue (Total Customer Payment)"] > 0]
+    # ========================================================
+    # DIAGNOSTIC: identify rows removed by the revenue filter
+    # ========================================================
+    revenue_col = "Revenue (Total Customer Payment)"
+
+    revenue_values = pd.to_numeric(
+        df[revenue_col].astype(str).str.replace(",", "", regex=False),
+        errors="coerce"
+    )
+
+    removed_rows = df[
+        revenue_values.isna() | (revenue_values <= 0)
+    ].copy()
+
+    print(f"\n--- CLEANING DIAGNOSTIC: {df.get('Data Source', pd.Series(['Unknown'])).iloc[0] if not df.empty else 'Empty'} ---")
+    print(f"Rows before revenue filter: {len(df)}")
+    print(f"Rows removed by revenue filter: {len(removed_rows)}")
+
+    if not removed_rows.empty:
+        columns_to_show = [
+            c for c in [
+                "Order ID",
+                "Date of Order",
+                "Revenue (Total Customer Payment)",
+                "Data Source"
+            ]
+            if c in removed_rows.columns
+        ]
+        print(removed_rows[columns_to_show].to_string(index=False))
+
+    # Keep the original filtering behaviour temporarily
+    # Keep valid orders including zero-revenue/free orders
+    df = df.loc[revenue_values >= 0].copy()
 
     # --------------------------------------------------------
     # REVENUE MODEL
@@ -486,9 +517,27 @@ def load_orders():
     if supabase_df.empty:
         return sheets_df
 
-    # Clean merge — no overlap possible due to date cutoff
-    merged = pd.concat([sheets_df, supabase_df], ignore_index=True)
-    merged = merged.sort_values("Date of Order").reset_index(drop=True)
+    # ========================================================
+    # DIAGNOSTIC: Check merged row counts
+    # ========================================================
+    merged = pd.concat(
+        [sheets_df, supabase_df],
+        ignore_index=True
+    )
+
+    print("\n=== FINAL DATA LOADER CHECK ===")
+    print(f"Google Sheets rows after cleaning: {len(sheets_df)}")
+    print(f"Supabase rows after cleaning: {len(supabase_df)}")
+    print(f"Combined rows after cleaning: {len(merged)}")
+    print(f"Unique Order IDs: {merged['Order ID'].nunique()}")
+
+    print("\nRows by source:")
+    print(merged["Data Source"].value_counts(dropna=False))
+
+    merged = merged.sort_values(
+        "Date of Order"
+    ).reset_index(drop=True)
+
     return merged
 
 

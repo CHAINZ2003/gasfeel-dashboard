@@ -92,9 +92,10 @@ def render_operation(df):
             </div>
         """, unsafe_allow_html=True)
     with k4:
-        on_time_color = "kpi-positive" if on_time_rate >= 70 else "kpi-negative"
-        on_time_str   = f"▲{on_time_rate:.1f}%"
-        kpi_card("On-Time Rate (≤10 mins)", on_time_str, color=on_time_color)
+        on_time_color = "green" if on_time_rate >= 70 else "red"
+        arrow = "▲" if on_time_rate >= 70 else "▼"
+        on_time_str = f"<span style='color:{on_time_color};'>{arrow}{on_time_rate:.1f}%</span>"
+        kpi_card("On-Time Rate (≤10 mins)", on_time_str)
 
     st.markdown("""
         <p style='color:#888;font-size:12px;font-style:italic;margin:4px 0 16px 0;'>
@@ -155,7 +156,7 @@ def render_operation(df):
             yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title="Mins"),
             height=280
         )
-        st.plotly_chart(fig_area, use_container_width=True)
+        st.plotly_chart(fig_area, width="stretch")
 
     # ---- CHART 2: Rider Avg Delivery Time ----
     with row1_right:
@@ -213,7 +214,7 @@ def render_operation(df):
             yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title="Mins"),
             height=280
         )
-        st.plotly_chart(fig_rider, use_container_width=True)
+        st.plotly_chart(fig_rider, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -261,7 +262,7 @@ def render_operation(df):
             yaxis=dict(showgrid=False, title=""),
             height=280
         )
-        st.plotly_chart(fig_orders, use_container_width=True)
+        st.plotly_chart(fig_orders, width="stretch")
 
     # ---- CHART 4: Hourly Order Pattern ----
     with row2_mid:
@@ -324,7 +325,7 @@ def render_operation(df):
             ),
             height=280
         )
-        st.plotly_chart(fig_hourly, use_container_width=True)
+        st.plotly_chart(fig_hourly, width="stretch")
 
     # ---- CHART 5: Free vs Paid Delivery ----
     with row2_right:
@@ -361,4 +362,4 @@ def render_operation(df):
             legend=dict(orientation="v", x=1, y=0.5),
             height=280
         )
-        st.plotly_chart(fig_delivery, use_container_width=True)
+        st.plotly_chart(fig_delivery, width="stretch")
