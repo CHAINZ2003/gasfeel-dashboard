@@ -434,5 +434,5 @@ elif selected_tab == "🎯 Intelligence":
         render_product_frequency
     )
     render_customer_intelligence(filtered_df)
-    render_retention_cohort(filtered_df)
-    render_product_frequency(filtered_df)
+    render_retention_cohort(filtered_df, full_orders_df=df)
+    render_product_frequency(filtered_df, full_orders_df=df)

@@ -1,9 +1,14 @@
 # ============================================================
 # CUSTOMER INTELLIGENCE TAB — GasFeel Dashboard
-# Deep customer analysis using enriched Supabase customers table.
-# Shows membership, deposits, run-out dates, acquisition channels,
-# retention cohorts, and product frequency analysis.
-# All charts include descriptions for team readability.
+# Snapshot KPIs, run-out and reachout lists, membership,
+# acquisition, deposits, New vs Returning, active-base retention
+# (monthly + weekly) and product frequency.
+#
+# Wiring in app.py:
+#   render_customer_intelligence(filtered_df)
+#   render_retention_cohort(filtered_df, full_orders_df=df)
+#   render_product_frequency(filtered_df, full_orders_df=df)
+# (df = full orders BEFORE the sidebar filters)
 # ============================================================
 
 import streamlit as st
@@ -21,7 +26,7 @@ def format_naira(value):
     try:
         if pd.isna(value) or value == 0:
             return "₦0"
-    except:
+    except Exception:
         return "₦0"
     if value >= 1_000_000:
         return f"₦{value/1_000_000:.2f}M"
@@ -41,6 +46,31 @@ def chart_note(text):
             💡 {text}
         </p>
     """, unsafe_allow_html=True)
+
+
+# ============================================================
+# HELPER — NORMALISE PHONE NUMBERS (last 10 digits)
+# ============================================================
+def normalise_phone(series):
+    digits = series.astype(str).str.replace(r"\D", "", regex=True).str[-10:]
+    return digits.where(digits.str.len() >= 7, other=pd.NA)
+
+
+# ============================================================
+# HELPER — UNIQUE CUSTOMER KEY
+# Customer Name (lowercase) is the only identifier shared by both
+# data sources (Sheets has no phone), so it is used everywhere.
+# Rows without a usable name or date are dropped.
+# ============================================================
+def add_customer_key(df):
+    df = df.copy()
+    df["Date of Order"] = pd.to_datetime(df["Date of Order"], errors="coerce")
+    name_key = (
+        df["Customer Name"].astype(str).str.strip().str.lower()
+        .replace({"": pd.NA, "none": pd.NA, "nan": pd.NA})
+    )
+    df["_key"] = name_key
+    return df.dropna(subset=["Date of Order", "_key"])
 
 
 # ============================================================
@@ -74,20 +104,13 @@ def load_customer_intelligence():
 
         df = pd.DataFrame(all_customers)
 
-        date_cols = [
-            "last_bought_date", "run_out_date",
-            "next_reachout_date", "created_at"
-        ]
-        for col in date_cols:
+        for col in ["last_bought_date", "run_out_date",
+                    "next_reachout_date", "created_at"]:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
 
-        num_cols = [
-            "deposit_balance", "usual_kg",
-            "daily_fuel_amount", "membership_deliveries_used",
-            "membership_deliveries_total"
-        ]
-        for col in num_cols:
+        for col in ["deposit_balance", "usual_kg", "daily_fuel_amount",
+                    "membership_deliveries_used", "membership_deliveries_total"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
@@ -110,11 +133,7 @@ def render_customer_intelligence(orders_df):
         st.info("No customer intelligence data available.")
         return
 
-    # --------------------------------------------------------
-    # CALCULATE SNAPSHOT METRICS
-    # --------------------------------------------------------
     total_customers  = len(customers_df)
-    active_customers = customers_df["is_active"].sum()
     member_customers = customers_df["is_member"].sum()
     total_deposit    = customers_df["deposit_balance"].sum()
     avg_deposit      = customers_df[
@@ -135,9 +154,7 @@ def render_customer_intelligence(orders_df):
         if customers_df["membership_deliveries_total"].sum() > 0 else 0
     )
 
-    # --------------------------------------------------------
-    # SECTION 1 — SNAPSHOT KPIs
-    # --------------------------------------------------------
+    # ---------------- SECTION 1 — SNAPSHOT KPIs ----------------
     st.markdown(
         "<div class='section-title'>⚡ Customer Intelligence Snapshot</div>",
         unsafe_allow_html=True
@@ -149,7 +166,10 @@ def render_customer_intelligence(orders_df):
     )
 
     def snap(label, value, sub=None, color="#003399"):
-        sub_html = f"<div style='font-size:11px;color:{color};font-weight:600;margin-top:4px;'>{sub}</div>" if sub else ""
+        sub_html = (
+            f"<div style='font-size:11px;color:{color};font-weight:600;"
+            f"margin-top:4px;'>{sub}</div>" if sub else ""
+        )
         st.markdown(f"""
             <div style="background:white;border-radius:12px;padding:16px 14px;
                         box-shadow:0 4px 12px rgba(0,51,153,0.10);
@@ -166,29 +186,25 @@ def render_customer_intelligence(orders_df):
 
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     with k1:
-        snap("Total Customers", f"{total_customers:,}", "in database", "#003399")
+        snap("Total Customers", f"{total_customers:,}", "in database")
     with k2:
         snap("Active Members", f"{int(member_customers):,}",
-             f"{(member_customers/total_customers*100):.1f}% of base", "#003399")
+             f"{(member_customers/total_customers*100):.1f}% of base")
     with k3:
         snap("Deposit Balance", format_naira(total_deposit),
-             f"avg {format_naira(avg_deposit)}/customer", "#003399")
+             f"avg {format_naira(avg_deposit)}/customer")
     with k4:
-        snap("Running Out Soon", f"{len(running_out_soon):,}",
-             "within 7 days",
+        snap("Running Out Soon", f"{len(running_out_soon):,}", "within 7 days",
              "#cc0000" if len(running_out_soon) > 10 else "#f0a500")
     with k5:
         snap("Reachout Due", f"{len(reachout_due):,}",
              "today or overdue", "#f0a500")
     with k6:
-        snap("Membership Utilization", f"{mem_util:.1f}%",
-             "deliveries used", "#003399")
+        snap("Membership Utilization", f"{mem_util:.1f}%", "deliveries used")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # SECTION 2 — RUNNING OUT SOON
-    # --------------------------------------------------------
+    # ---------------- SECTION 2 — RUNNING OUT SOON ----------------
     st.markdown(
         "<div class='section-title'>🔴 Customers Running Out This Week — Call Now</div>",
         unsafe_allow_html=True
@@ -210,15 +226,15 @@ def render_customer_intelligence(orders_df):
             runout_display["run_out_date"] - today
         ).dt.days
         runout_display = runout_display.sort_values("Days Until Empty")
-        runout_display["run_out_date"]    = runout_display["run_out_date"].dt.strftime("%d %b %Y")
+        runout_display["run_out_date"]     = runout_display["run_out_date"].dt.strftime("%d %b %Y")
         runout_display["last_bought_date"] = runout_display["last_bought_date"].dt.strftime("%d %b %Y")
         runout_display = runout_display.rename(columns={
-            "name":            "Customer",
-            "whatsapp_number": "WhatsApp",
-            "customer_type":   "Type",
-            "usual_kg":        "Usual Qty",
-            "run_out_date":    "Runs Out",
-            "last_bought_date":"Last Order"
+            "name":             "Customer",
+            "whatsapp_number":  "WhatsApp",
+            "customer_type":    "Type",
+            "usual_kg":         "Usual Qty",
+            "run_out_date":     "Runs Out",
+            "last_bought_date": "Last Order"
         })
         st.dataframe(runout_display, width="stretch", hide_index=True)
     else:
@@ -226,9 +242,7 @@ def render_customer_intelligence(orders_df):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # SECTION 3 — REACHOUT SCHEDULE
-    # --------------------------------------------------------
+    # ---------------- SECTION 3 — REACHOUT SCHEDULE ----------------
     st.markdown(
         "<div class='section-title'>📞 Reachout Due Today or Overdue</div>",
         unsafe_allow_html=True
@@ -272,9 +286,7 @@ def render_customer_intelligence(orders_df):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # SECTION 4 — MEMBER VS NON-MEMBER
-    # --------------------------------------------------------
+    # ---------------- SECTION 4 — MEMBER VS NON-MEMBER ----------------
     st.markdown(
         "<div class='section-title'>👑 Member vs Non-Member Analysis</div>",
         unsafe_allow_html=True
@@ -292,22 +304,18 @@ def render_customer_intelligence(orders_df):
             "A growing member base means more predictable recurring revenue "
             "and lower churn risk since members have committed upfront."
         )
-
         member_counts = pd.DataFrame({
             "Status": ["Member", "Non-Member"],
             "Count":  [int(member_customers), int(total_customers - member_customers)]
         })
         fig_mem = px.pie(
-            member_counts,
-            names="Status", values="Count",
-            hole=0.55,
+            member_counts, names="Status", values="Count", hole=0.55,
             color_discrete_sequence=["#003399", "#ccd9ff"]
         )
         fig_mem.update_traces(textinfo="label+value+percent", textfont_size=11)
         fig_mem.update_layout(
             plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=5, r=5, t=20, b=5),
-            height=280
+            margin=dict(l=5, r=5, t=20, b=5), height=280
         )
         st.plotly_chart(fig_mem, width="stretch")
 
@@ -317,47 +325,42 @@ def render_customer_intelligence(orders_df):
             unsafe_allow_html=True
         )
         chart_note(
-            "Revenue contribution from members vs non-members. "
+            "Revenue contribution from members vs non-members "
+            "(for the period selected in the filter). "
+            "Only orders with a phone number (Aug 2026 onward) can be matched "
+            "to members; older Google Sheets orders count as non-member. "
             "If members generate a disproportionately large revenue share, "
-            "the membership programme is working well. "
-            "If non-members dominate revenue, consider incentives "
-            "to convert high-value non-members into members."
+            "the membership programme is working well."
         )
 
         if "Customer Phone" in orders_df.columns:
+            orders_copy = orders_df.copy()   # never mutate the caller's data
             member_phones = set(
-                customers_df[customers_df["is_member"] == True][
-                    "whatsapp_number"
-                ].astype(str).tolist()
+                normalise_phone(
+                    customers_df[customers_df["is_member"] == True]["whatsapp_number"]
+                ).dropna().tolist()
             )
-            orders_df["Is Member"] = orders_df[
-                "Customer Phone"
-            ].astype(str).isin(member_phones)
-            mem_rev = orders_df.groupby("Is Member")["Revenue"].sum().reset_index()
+            orders_copy["Is Member"] = normalise_phone(
+                orders_copy["Customer Phone"]
+            ).isin(member_phones)
+            mem_rev = orders_copy.groupby("Is Member")["Revenue"].sum().reset_index()
             mem_rev["Status"] = mem_rev["Is Member"].map(
                 {True: "Member", False: "Non-Member"}
             )
             fig_mem_rev = px.pie(
-                mem_rev,
-                names="Status", values="Revenue",
-                hole=0.55,
+                mem_rev, names="Status", values="Revenue", hole=0.55,
                 color_discrete_sequence=["#003399", "#ccd9ff"]
             )
-            fig_mem_rev.update_traces(
-                textinfo="label+percent", textfont_size=11
-            )
+            fig_mem_rev.update_traces(textinfo="label+percent", textfont_size=11)
             fig_mem_rev.update_layout(
                 plot_bgcolor="white", paper_bgcolor="white",
-                margin=dict(l=5, r=5, t=20, b=5),
-                height=280
+                margin=dict(l=5, r=5, t=20, b=5), height=280
             )
             st.plotly_chart(fig_mem_rev, width="stretch")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # SECTION 5 — ACQUISITION CHANNEL + DEPOSIT DISTRIBUTION
-    # --------------------------------------------------------
+    # ---------------- SECTION 5 — ACQUISITION + DEPOSITS ----------------
     st.markdown(
         "<div class='section-title'>📣 Acquisition & Deposit Analysis</div>",
         unsafe_allow_html=True
@@ -376,7 +379,6 @@ def render_customer_intelligence(orders_df):
             "Invest more in what is working and review channels "
             "that bring very few customers."
         )
-
         channel_counts = customers_df[
             customers_df["acquisition_channel"].notna()
         ]["acquisition_channel"].value_counts().reset_index()
@@ -384,15 +386,12 @@ def render_customer_intelligence(orders_df):
 
         if not channel_counts.empty:
             fig_channel = px.bar(
-                channel_counts,
-                x="Customers", y="Channel",
-                orientation="h",
-                text="Customers",
+                channel_counts, x="Customers", y="Channel",
+                orientation="h", text="Customers",
                 color_discrete_sequence=["#003399"]
             )
             fig_channel.update_traces(
-                textposition="outside",
-                textfont=dict(size=10, color="#333333")
+                textposition="outside", textfont=dict(size=10, color="#333333")
             )
             fig_channel.update_layout(
                 plot_bgcolor="white", paper_bgcolor="white",
@@ -417,26 +416,19 @@ def render_customer_intelligence(orders_df):
             "these customers have committed significant funds and "
             "are highly unlikely to churn."
         )
-
         deposit_customers = customers_df[customers_df["deposit_balance"] > 0]
         if not deposit_customers.empty:
             fig_deposit = px.histogram(
-                deposit_customers,
-                x="deposit_balance",
-                nbins=20,
+                deposit_customers, x="deposit_balance", nbins=20,
                 color_discrete_sequence=["#003399"]
             )
             fig_deposit.update_layout(
                 plot_bgcolor="white", paper_bgcolor="white",
                 margin=dict(l=5, r=5, t=10, b=5),
-                xaxis=dict(
-                    showgrid=True, gridcolor="#f0f0f0",
-                    title="Deposit Balance (₦)"
-                ),
-                yaxis=dict(
-                    showgrid=True, gridcolor="#f0f0f0",
-                    title="Number of Customers"
-                ),
+                xaxis=dict(showgrid=True, gridcolor="#f0f0f0",
+                           title="Deposit Balance (₦)"),
+                yaxis=dict(showgrid=True, gridcolor="#f0f0f0",
+                           title="Number of Customers"),
                 height=280
             )
             st.plotly_chart(fig_deposit, width="stretch")
@@ -444,311 +436,320 @@ def render_customer_intelligence(orders_df):
             st.info("No deposit balance data yet.")
 
 
-def render_retention_cohort(orders_df):
+# ============================================================
+# NEW vs RETURNING SUMMARY
+# New          = first-ever order was in that period
+# Returning    = ordered in that period, first ordered earlier
+# Total Active = New + Returning (matches the Customer tab)
+# Built from FULL history; the filter only picks which periods show.
+# ============================================================
+def new_vs_returning_summary(full_df, view_df, freq):
+
+    full = add_customer_key(full_df)
+    if full.empty:
+        return None
+
+    full["_period"] = full["Date of Order"].dt.to_period(freq)
+    first_period = full.groupby("_key")["_period"].min()
+
+    total = full.groupby("_period")["_key"].nunique()
+    new   = first_period.value_counts()
+
+    summary = pd.DataFrame({"New Customers": new, "Total Active": total})
+    summary = summary.fillna(0).astype(int).sort_index()
+    summary["Returning Customers"] = summary["Total Active"] - summary["New Customers"]
+    summary["Returning %"] = (
+        summary["Returning Customers"] / summary["Total Active"] * 100
+    ).round(0).astype(int).astype(str) + "%"
+    summary = summary[["New Customers", "Returning Customers",
+                       "Total Active", "Returning %"]]
+
+    view = pd.to_datetime(view_df["Date of Order"], errors="coerce").dropna()
+    if not view.empty:
+        summary = summary[summary.index.isin(view.dt.to_period(freq).unique())]
+
+    summary.index = summary.index.astype(str)
+    summary.index.name = "Period"
+    return summary
+
+
+# ============================================================
+# ACTIVE-BASE RETENTION ENGINE
+# Base for each period = ALL customers who ordered in that period
+# (new + returning). Retention in period +N = how many of those same
+# customers ordered again N periods later.
+#
+# Returns:
+#   counts — rows = period, cols = 0..max_periods
+#            NaN = period has not happened yet, 0 = nobody came back
+#   new    — Series: how many of the base were new in that period
+# ============================================================
+def build_active_base(full_df, view_df, freq, max_periods):
+
+    full = add_customer_key(full_df)
+    if full.empty:
+        return None, None
+
+    full["_period"] = full["Date of Order"].dt.to_period(freq)
+
+    first_period = full.groupby("_key")["_period"].min()
+    new_by_period = first_period.value_counts()
+    active_sets = full.groupby("_period")["_key"].apply(set).to_dict()
+
+    all_periods = pd.period_range(
+        full["_period"].min(), full["_period"].max(), freq=freq
+    )
+    current_period = pd.Timestamp.now().to_period(freq)
+
+    rows = {}
+    for p in all_periods:
+        base = active_sets.get(p, set())
+        row = {}
+        for n in range(0, max_periods + 1):
+            target = p + n
+            if target > current_period:
+                row[n] = float("nan")              # not happened yet
+            elif n == 0:
+                row[n] = len(base)
+            else:
+                row[n] = len(base & active_sets.get(target, set()))
+        rows[p] = row
+
+    counts = pd.DataFrame.from_dict(rows, orient="index")
+    new = new_by_period.reindex(counts.index).fillna(0).astype(int)
+
+    # Filter only decides which periods are displayed
+    view = pd.to_datetime(view_df["Date of Order"], errors="coerce").dropna()
+    if not view.empty:
+        shown = view.dt.to_period(freq).unique()
+        counts = counts[counts.index.isin(shown)]
+
+    counts = counts[counts[0] > 0]
+    new = new.loc[counts.index]
+
+    if counts.empty:
+        return None, None
+    return counts, new
+
+
+# ============================================================
+# RETENTION DISPLAY (shared by monthly and weekly)
+# ============================================================
+def render_active_views(counts, new, unit, zero_label, heat_height, key):
+
+    sizes = counts[0].astype(int)
+    pct   = counts.divide(sizes, axis=0) * 100
+    cols  = list(counts.columns)
+
+    def col_name(p):
+        return zero_label if p == 0 else f"{unit} +{int(p)}"
+
+    # ---------------- TABLE ----------------
+    rows = []
+    for period in counts.index:
+        base = int(sizes[period])
+        row = {
+            "Period": str(period),
+            "Total Active (Base)": base,
+            "New": int(new[period]),
+            "Returning": base - int(new[period]),
+        }
+        for p in cols:
+            c = counts.loc[period, p]
+            if pd.isna(c):
+                row[col_name(p)] = ""
+            elif p == 0:
+                row[col_name(p)] = f"{int(c)} (100%)"
+            else:
+                row[col_name(p)] = f"{int(c)}/{base} ({pct.loc[period, p]:.0f}%)"
+        rows.append(row)
+
+    # Weighted average — only periods old enough to reach that column
+    avg_row = {
+        "Period": "WEIGHTED AVG",
+        "Total Active (Base)": int(sizes.sum()),
+        "New": int(new.sum()),
+        "Returning": int(sizes.sum() - new.sum()),
+    }
+    for p in cols:
+        eligible = counts[p].notna()
+        if p == 0:
+            avg_row[col_name(p)] = "100%"
+        elif eligible.any() and sizes[eligible].sum() > 0:
+            avg = counts.loc[eligible, p].sum() / sizes[eligible].sum() * 100
+            avg_row[col_name(p)] = f"{avg:.0f}%"
+        else:
+            avg_row[col_name(p)] = ""
+    rows.append(avg_row)
+
+    st.dataframe(pd.DataFrame(rows).set_index("Period"), use_container_width=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ---------------- HEATMAP ----------------
+    labels, hover = [], []
+    for period in counts.index:
+        base = int(sizes[period])
+        r_lab, r_hov = [], []
+        for p in cols:
+            c = counts.loc[period, p]
+            if pd.isna(c):
+                r_lab.append("")
+                r_hov.append("Not enough time has passed yet")
+            else:
+                r_lab.append(f"{int(c)}<br>({pct.loc[period, p]:.0f}%)")
+                r_hov.append(
+                    f"{int(c)} of {base} active customers "
+                    f"({pct.loc[period, p]:.0f}%)"
+                )
+        labels.append(r_lab)
+        hover.append(r_hov)
+
+    fig = go.Figure(data=go.Heatmap(
+        z=pct.values,
+        x=[col_name(p) for p in cols],
+        y=[f"{p}  (n={int(sizes[p])})" for p in counts.index],
+        colorscale=[
+            [0,   "#fff0f0"],
+            [0.3, "#ccd9ff"],
+            [0.6, "#8fb0ff"],
+            [1,   "#4d79d9"],
+        ],
+        zmin=0, zmax=100,
+        text=labels,
+        texttemplate="%{text}",
+        textfont=dict(size=10, color="#111111"),
+        hovertext=hover,
+        hovertemplate="%{y}<br>%{x}<br>%{hovertext}<extra></extra>",
+        showscale=True,
+        xgap=2, ygap=2,
+    ))
+    fig.update_layout(
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=10, r=10, t=20, b=10),
+        xaxis=dict(title=f"{unit}s after the active {unit.lower()}", side="top"),
+        yaxis=dict(title="Active period (n = total active customers)",
+                   autorange="reversed"),
+        height=heat_height,
+    )
+    st.plotly_chart(fig, use_container_width=True, key=key)
+
+
+# ============================================================
+# RETENTION ANALYSIS
+# orders_df       = filtered orders (decides which periods are shown)
+# full_orders_df  = ALL orders, unfiltered (decides who is active)
+# ============================================================
+def render_retention_cohort(orders_df, full_orders_df=None):
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='section-title'>🔄 Retention Cohort Analysis</div>",
+        "<div class='section-title'>🔄 Retention Analysis (Active Base)</div>",
+        unsafe_allow_html=True
+    )
+
+    if full_orders_df is None:
+        st.warning(
+            "Full (unfiltered) order history was not supplied, so results are "
+            "built from filtered data. Pass full_orders_df=<all orders> for "
+            "correct results."
+        )
+        full_orders_df = orders_df
+
+    chart_note(
+        "Total Active (Base) = every customer who ordered in that month or week, "
+        "split into New (first ever order in that period) and Returning "
+        "(ordered before). Month +1, +2... show how many of THOSE SAME customers "
+        "ordered again 1, 2... periods later. "
+        "Example: '45/84 (54%)' = 45 of the 84 customers active in that month "
+        "ordered again the next month. The base matches the Active count on the "
+        "Customer tab and never changes with the filter. "
+        "A blank cell means that period has not happened yet; '0 (0%)' means it "
+        "has and nobody came back. WEIGHTED AVG = overall retention per column "
+        "across all rows shown."
+    )
+
+    # ================= MONTHLY =================
+    st.markdown(
+        "<div class='section-title'>👥 Customers Per Month: New vs Returning</div>",
         unsafe_allow_html=True
     )
     chart_note(
-        "Each row is a group of customers who placed their FIRST ever order "
-        "in that month — called a cohort. "
-        "The columns show how many of those customers came back "
-        "in Month 1, Month 2, Month 3 after their first order. "
-        "Month 0 always shows 100% because that is when they first ordered. "
-        "Read it like this: 'Of the 45 customers who first ordered in January, "
-        "28 (62%) came back in February, and 19 (42%) came back in March.' "
-        "Higher numbers = stronger long-term retention."
+        "New = first-ever order that month. "
+        "Returning = ordered this month but first ordered in an earlier month. "
+        "Total Active = New + Returning. This is the base for the retention "
+        "table below."
     )
+    m_summary = new_vs_returning_summary(full_orders_df, orders_df, "M")
+    if m_summary is not None and not m_summary.empty:
+        st.dataframe(m_summary, use_container_width=True)
+    else:
+        st.info("No data for the selected period.")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # BUILD COHORT DATA
-    # --------------------------------------------------------
-    first_orders = orders_df.groupby(
-        "Customer Name"
-    )["Date of Order"].min().reset_index()
-    first_orders.columns   = ["Customer Name", "First Order Date"]
-    first_orders["Cohort Month"] = first_orders["First Order Date"].dt.to_period("M")
-
-    cohort_df = orders_df.merge(first_orders, on="Customer Name")
-    cohort_df["Order Month"]   = cohort_df["Date of Order"].dt.to_period("M")
-    cohort_df["Period Number"] = (
-        cohort_df["Order Month"] - cohort_df["Cohort Month"]
-    ).apply(lambda x: x.n)
-
-    cohort_counts = cohort_df.groupby(
-        ["Cohort Month", "Period Number"]
-    )["Customer Name"].nunique().reset_index()
-    cohort_counts.columns = ["Cohort Month", "Period", "Customers"]
-
-    cohort_pivot = cohort_counts.pivot(
-        index="Cohort Month", columns="Period", values="Customers"
-    )
-
-    cohort_size   = cohort_pivot[0]
-    retention_pct = cohort_pivot.divide(cohort_size, axis=0) * 100
-
-    # --------------------------------------------------------
-    # DESCRIPTIVE TABLE — Numbers + % in each cell
-    # --------------------------------------------------------
     st.markdown(
         "<div class='section-title'>📋 Month-on-Month Retention Table</div>",
         unsafe_allow_html=True
     )
-    chart_note(
-        "Each cell shows: number of customers who returned / total in cohort (%). "
-        "Example: '28/45 (62%)' means 28 out of 45 first-time customers "
-        "from that month came back. "
-        "Empty cells mean not enough time has passed yet."
-    )
+    m_counts, m_new = build_active_base(full_orders_df, orders_df, "M", max_periods=12)
 
-    descriptive_rows = []
-    for cohort_month in cohort_pivot.index:
-        row = {"Cohort Month": str(cohort_month)}
-        cohort_total = int(cohort_size[cohort_month])
-        row["Cohort Size"] = f"{cohort_total} customers"
+    if m_counts is None:
+        st.info("No data for the selected period.")
+    else:
+        render_active_views(
+            m_counts, m_new, unit="Month", zero_label="Month 0 (Active)",
+            heat_height=max(320, 60 + 42 * len(m_counts)),
+            key="monthly_active_heat"
+        )
 
-        for period in cohort_pivot.columns:
-            count = cohort_pivot.loc[cohort_month, period]
-            pct   = retention_pct.loc[cohort_month, period]
-            if pd.notna(count):
-                count = int(count)
-                if period == 0:
-                    row[f"Month 0 (Start)"] = f"{count} (100%)"
-                else:
-                    row[f"Month +{int(period)}"] = f"{count}/{cohort_total} ({pct:.0f}%)"
-            else:
-                if period == 0:
-                    row["Month 0 (Start)"] = ""
-                else:
-                    row[f"Month +{int(period)}"] = ""
-
-        descriptive_rows.append(row)
-
-    descriptive_df = pd.DataFrame(descriptive_rows)
-    descriptive_df = descriptive_df.set_index("Cohort Month")
-
-    st.dataframe(descriptive_df, use_container_width=True)
-
+    # ================= WEEKLY =================
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # --------------------------------------------------------
-    # HEATMAP — Visual version
-    # --------------------------------------------------------
     st.markdown(
-        "<div class='section-title'>🗺️ Retention Heatmap</div>",
+        "<div class='section-title'>👥 Customers Per Week: New vs Returning</div>",
         unsafe_allow_html=True
     )
     chart_note(
-        "Same data shown as a colour heatmap. "
-        "Each cell shows the retention % and the actual customer count. "
-        "Dark blue = strong retention. Light = weak. Empty = no data yet. "
-        "Read each row left to right — this shows how quickly "
-        "customers from each month stopped coming back."
+        "Same split by week: New = first-ever order that week, "
+        "Returning = ordered before. Shows the latest 12 weeks in the "
+        "selected period."
     )
-
-    retention_vals = retention_pct.copy()
-    retention_vals.index = retention_vals.index.astype(str)
-
-    # Build hover text with both count and percentage
-    hover_text = []
-    for cohort_month in cohort_pivot.index:
-        row_text = []
-        cohort_total = int(cohort_size[cohort_month])
-        for period in cohort_pivot.columns:
-            count = cohort_pivot.loc[cohort_month, period]
-            pct   = retention_pct.loc[cohort_month, period]
-            if pd.notna(count):
-                row_text.append(
-                    f"{int(count)} of {cohort_total} customers ({pct:.0f}%)"
-                )
-            else:
-                row_text.append("")
-        hover_text.append(row_text)
-
-    # Cell labels showing both count and %
-    cell_labels = []
-    for cohort_month in cohort_pivot.index:
-        row_labels = []
-        cohort_total = int(cohort_size[cohort_month])
-        for period in cohort_pivot.columns:
-            count = cohort_pivot.loc[cohort_month, period]
-            pct   = retention_pct.loc[cohort_month, period]
-            if pd.notna(count):
-                row_labels.append(f"{int(count)}\n({pct:.0f}%)")
-            else:
-                row_labels.append("")
-        cell_labels.append(row_labels)
-
-    fig_heat = go.Figure(data=go.Heatmap(
-        z=retention_vals.values,
-        x=[f"Month 0 (Start)" if c == 0 else f"Month +{int(c)}"
-           for c in retention_vals.columns],
-        y=retention_vals.index.tolist(),
-        colorscale=[
-            [0,   "#fff0f0"],
-            [0.3, "#ccd9ff"],
-            [0.6, "#6699ff"],
-            [1,   "#003399"]
-        ],
-        text=cell_labels,
-        texttemplate="%{text}",
-        textfont=dict(size=10, color="white"),
-        hovertext=hover_text,
-        hovertemplate="%{hovertext}<extra></extra>",
-        showscale=True
-    ))
-    fig_heat.update_layout(
-        plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=10, r=10, t=20, b=10),
-        xaxis=dict(title="Months Since First Order"),
-        yaxis=dict(title="Cohort Month"),
-        height=400
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
-
-    # --------------------------------------------------------
-    # WEEK BY WEEK RETENTION TABLE
-    # --------------------------------------------------------
+    w_summary = new_vs_returning_summary(full_orders_df, orders_df, "W")
+    if w_summary is not None and not w_summary.empty:
+        st.dataframe(w_summary.tail(12), use_container_width=True)
+    else:
+        st.info("No weekly data for the selected period.")
     st.markdown("<br>", unsafe_allow_html=True)
+
     st.markdown(
         "<div class='section-title'>📅 Week-by-Week Retention Table</div>",
         unsafe_allow_html=True
     )
     chart_note(
-        "Same cohort analysis but broken down by week instead of month. "
-        "Each row = customers who ordered for the FIRST time in that week. "
-        "Each column shows how many came back in Week +1, Week +2 etc. "
-        "Read it like: '12/20 (60%) means 12 out of 20 customers "
-        "who first ordered in that week came back the following week.' "
-        "Use this for faster feedback on retention trends than monthly view."
+        "Same logic by week. Each row = a week, with Total Active (Base) = "
+        "every customer who ordered that week (New + Returning). Columns show "
+        "how many of them ordered again in Week +1, +2 ... +8. "
+        "Shows the latest 12 weeks in the selected period."
     )
 
-    # Build weekly cohort
-    first_orders_wk = orders_df.groupby(
-        "Customer Name"
-    )["Date of Order"].min().reset_index()
-    first_orders_wk.columns = ["Customer Name", "First Order Date"]
-    first_orders_wk["Cohort Week"] = first_orders_wk[
-        "First Order Date"
-    ].dt.to_period("W")
+    w_counts, w_new = build_active_base(full_orders_df, orders_df, "W", max_periods=8)
 
-    cohort_wk = orders_df.merge(first_orders_wk, on="Customer Name")
-    cohort_wk["Order Week"]     = cohort_wk["Date of Order"].dt.to_period("W")
-    cohort_wk["Period Number"]  = (
-        cohort_wk["Order Week"] - cohort_wk["Cohort Week"]
-    ).apply(lambda x: x.n)
+    if w_counts is None:
+        st.info("No weekly data for the selected period.")
+    else:
+        w_counts = w_counts.tail(12)
+        w_new = w_new.loc[w_counts.index]
+        render_active_views(
+            w_counts, w_new, unit="Week", zero_label="Week 0 (Active)",
+            heat_height=max(320, 60 + 42 * len(w_counts)),
+            key="weekly_active_heat"
+        )
 
-    # Only keep up to Week +8 to keep table readable
-    cohort_wk = cohort_wk[cohort_wk["Period Number"] <= 8]
-
-    wk_counts = cohort_wk.groupby(
-        ["Cohort Week", "Period Number"]
-    )["Customer Name"].nunique().reset_index()
-    wk_counts.columns = ["Cohort Week", "Period", "Customers"]
-
-    wk_pivot = wk_counts.pivot(
-        index="Cohort Week", columns="Period", values="Customers"
-    )
-
-    wk_size   = wk_pivot[0]
-    wk_pct    = wk_pivot.divide(wk_size, axis=0) * 100
-
-    # Build descriptive weekly table
-    wk_rows = []
-    for cohort_week in wk_pivot.index:
-        row = {
-            "Cohort Week": str(cohort_week),
-            "Cohort Size": f"{int(wk_size[cohort_week])} customers"
-        }
-        total = int(wk_size[cohort_week])
-        for period in wk_pivot.columns:
-            count = wk_pivot.loc[cohort_week, period]
-            pct   = wk_pct.loc[cohort_week, period]
-            if pd.notna(count):
-                count = int(count)
-                if period == 0:
-                    row["Week 0 (First Order)"] = f"{count} (100%)"
-                else:
-                    row[f"Week +{int(period)}"] = f"{count}/{total} ({pct:.0f}%)"
-            else:
-                if period == 0:
-                    row["Week 0 (First Order)"] = ""
-                else:
-                    row[f"Week +{int(period)}"] = ""
-        wk_rows.append(row)
-
-    wk_display = pd.DataFrame(wk_rows).set_index("Cohort Week")
-
-    # Only show last 12 weeks to keep readable
-    wk_display = wk_display.tail(12)
-
-    st.dataframe(wk_display, use_container_width=True)
-
-    # --------------------------------------------------------
-    # WEEK BY WEEK HEATMAP
-    # --------------------------------------------------------
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(
-        "<div class='section-title'>🗺️ Weekly Retention Heatmap</div>",
-        unsafe_allow_html=True
-    )
-    chart_note(
-        "Visual version of the weekly cohort table. "
-        "Each cell shows customer count and retention %. "
-        "Dark blue = strong week-on-week retention. "
-        "Fading quickly = customers are not coming back the following week. "
-        "Consistent dark blue across a row = highly loyal cohort."
-    )
-
-    wk_vals = wk_pct.copy()
-    wk_vals.index = wk_vals.index.astype(str)
-    wk_vals = wk_vals.tail(12)
-    wk_pivot_disp = wk_pivot.loc[wk_pivot.index[-12:]] if len(wk_pivot) > 12 else wk_pivot
-
-    wk_cell_labels = []
-    for cohort_week in wk_pivot_disp.index:
-        row_labels = []
-        total = int(wk_size[cohort_week])
-        for period in wk_pivot_disp.columns:
-            count = wk_pivot_disp.loc[cohort_week, period]
-            pct   = wk_pct.loc[cohort_week, period]
-            if pd.notna(count):
-                row_labels.append(f"{int(count)}\n({pct:.0f}%)")
-            else:
-                row_labels.append("")
-        wk_cell_labels.append(row_labels)
-
-    fig_wk_heat = go.Figure(data=go.Heatmap(
-        z=wk_vals.values,
-        x=["Week 0 (First)" if c == 0 else f"Week +{int(c)}"
-           for c in wk_vals.columns],
-        y=wk_vals.index.tolist(),
-        colorscale=[
-            [0,   "#fff0f0"],
-            [0.3, "#ccd9ff"],
-            [0.6, "#6699ff"],
-            [1,   "#003399"]
-        ],
-        text=wk_cell_labels,
-        texttemplate="%{text}",
-        textfont=dict(size=10, color="white"),
-        showscale=True
-    ))
-    fig_wk_heat.update_layout(
-        plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=10, r=10, t=20, b=10),
-        xaxis=dict(title="Weeks Since First Order"),
-        yaxis=dict(title="Cohort Week"),
-        height=420
-    )
-    st.plotly_chart(fig_wk_heat, use_container_width=True)
 
 # ============================================================
 # PRODUCT FREQUENCY DEEP DIVE
+# Lifetime stats (days since last order, avg gap between orders)
+# use the full order history so the filter cannot distort them.
 # ============================================================
-def render_product_frequency(orders_df):
+def render_product_frequency(orders_df, full_orders_df=None):
 
     today = pd.Timestamp.now().normalize()
 
@@ -758,20 +759,26 @@ def render_product_frequency(orders_df):
         unsafe_allow_html=True
     )
     chart_note(
-        "How frequently customers reorder. "
+        "How frequently customers reorder, calculated from each customer's "
+        "complete order history. "
         "Avg Days Between Orders = how long the typical customer waits before reordering. "
         "Lower = more engaged customers. Higher = customers are spacing out orders "
         "or buying from competitors between GasFeel orders."
     )
 
-    customer_orders = orders_df.sort_values(
-        ["Customer Name", "Date of Order"]
-    ).groupby("Customer Name").agg(
+    source = full_orders_df if full_orders_df is not None else orders_df
+    source = add_customer_key(source)
+
+    customer_orders = source.sort_values(
+        ["_key", "Date of Order"]
+    ).groupby("_key").agg(
+        **{"Customer Name": ("Customer Name", "last")},
         Total_Orders=("Order ID", "count"),
         First_Order=("Date of Order", "min"),
         Last_Order=("Date of Order", "max"),
         Total_Revenue=("Revenue", "sum"),
-        Products=("Order Type", lambda x: x.mode()[0] if len(x) > 0 else "Unknown")
+        Products=("Order Type",
+                  lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else "Unknown")
     ).reset_index()
 
     customer_orders["Days Since Last Order"] = (
@@ -785,7 +792,6 @@ def render_product_frequency(orders_df):
         (customer_orders["Total_Orders"] - 1)
     ).where(customer_orders["Total_Orders"] > 1, None).round(1)
 
-    # Early at-risk: 14-30 days silent
     early_risk = customer_orders[
         (customer_orders["Days Since Last Order"] >= 14) &
         (customer_orders["Days Since Last Order"] < 30)
@@ -819,7 +825,7 @@ def render_product_frequency(orders_df):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Early At-Risk Table
+    # ---------------- Early At-Risk table ----------------
     if not early_risk.empty:
         st.markdown(
             "<div class='section-title'>⚠️ Early At-Risk Customers (14-30 Days Silent)</div>",
@@ -838,26 +844,31 @@ def render_product_frequency(orders_df):
         ]].copy()
         early_display["Total_Revenue"] = early_display["Total_Revenue"].apply(format_naira)
         early_display = early_display.rename(columns={
-            "Customer Name":        "Customer",
-            "Days Since Last Order":"Days Silent",
-            "Total_Orders":         "Total Orders",
-            "Total_Revenue":        "Total Revenue",
-            "Products":             "Main Product"
+            "Customer Name":         "Customer",
+            "Days Since Last Order": "Days Silent",
+            "Total_Orders":          "Total Orders",
+            "Total_Revenue":         "Total Revenue",
+            "Products":              "Main Product"
         })
-        st.dataframe(
-            early_display, width="stretch",
-            hide_index=True, height=280
-        )
+        st.dataframe(early_display, width="stretch", hide_index=True, height=280)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Top vs Bottom Frequency
-    col3, col4 = st.columns(2)
+    # ---------------- Most / least frequent ----------------
+    col4, col5 = st.columns(2)
     freq_customers = customer_orders[
         customer_orders["Avg Days Between Orders"].notna()
     ].copy()
 
-    with col3:
+    freq_cols = ["Customer Name", "Avg Days Between Orders",
+                 "Total_Orders", "Total_Revenue"]
+    freq_rename = {
+        "Customer Name": "Customer",
+        "Total_Orders":  "Orders",
+        "Total_Revenue": "Revenue"
+    }
+
+    with col4:
         st.markdown(
             "<div class='section-title'>🏆 Most Frequent Customers</div>",
             unsafe_allow_html=True
@@ -868,20 +879,12 @@ def render_product_frequency(orders_df):
             "They deserve priority service, loyalty rewards, "
             "and first access to promotions."
         )
-        top_freq = freq_customers.nsmallest(10, "Avg Days Between Orders")[[
-            "Customer Name", "Avg Days Between Orders",
-            "Total_Orders", "Total_Revenue"
-        ]].copy()
+        top_freq = freq_customers.nsmallest(10, "Avg Days Between Orders")[freq_cols].copy()
         top_freq["Total_Revenue"] = top_freq["Total_Revenue"].apply(format_naira)
-        top_freq = top_freq.rename(columns={
-            "Customer Name":           "Customer",
-            "Avg Days Between Orders": "Avg Days Between Orders",
-            "Total_Orders":            "Orders",
-            "Total_Revenue":           "Revenue"
-        })
-        st.dataframe(top_freq, width="stretch", hide_index=True)
+        st.dataframe(top_freq.rename(columns=freq_rename),
+                     width="stretch", hide_index=True)
 
-    with col4:
+    with col5:
         st.markdown(
             "<div class='section-title'>📉 Least Frequent Customers</div>",
             unsafe_allow_html=True
@@ -893,22 +896,14 @@ def render_product_frequency(orders_df):
             "Target these customers with frequency incentives — "
             "discounts for ordering twice in one week for example."
         )
-        bottom_freq = freq_customers.nlargest(10, "Avg Days Between Orders")[[
-            "Customer Name", "Avg Days Between Orders",
-            "Total_Orders", "Total_Revenue"
-        ]].copy()
+        bottom_freq = freq_customers.nlargest(10, "Avg Days Between Orders")[freq_cols].copy()
         bottom_freq["Total_Revenue"] = bottom_freq["Total_Revenue"].apply(format_naira)
-        bottom_freq = bottom_freq.rename(columns={
-            "Customer Name":           "Customer",
-            "Avg Days Between Orders": "Avg Days Between Orders",
-            "Total_Orders":            "Orders",
-            "Total_Revenue":           "Revenue"
-        })
-        st.dataframe(bottom_freq, width="stretch", hide_index=True)
+        st.dataframe(bottom_freq.rename(columns=freq_rename),
+                     width="stretch", hide_index=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Order Frequency Distribution
+    # ---------------- Order frequency distribution ----------------
     st.markdown(
         "<div class='section-title'>📊 Order Frequency Distribution</div>",
         unsafe_allow_html=True
@@ -925,27 +920,17 @@ def render_product_frequency(orders_df):
     freq_dist = freq_dist.sort_values("Orders Count")
 
     fig_dist = px.bar(
-        freq_dist,
-        x="Orders Count",
-        y="Customers",
-        text="Customers",
+        freq_dist, x="Orders Count", y="Customers", text="Customers",
         color_discrete_sequence=["#003399"]
     )
     fig_dist.update_traces(
-        textposition="outside",
-        textfont=dict(size=10, color="#333333")
+        textposition="outside", textfont=dict(size=10, color="#333333")
     )
     fig_dist.update_layout(
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=5, r=5, t=10, b=5),
-        xaxis=dict(
-            showgrid=False, title="Number of Orders",
-            tickmode="linear"
-        ),
-        yaxis=dict(
-            showgrid=True, gridcolor="#f0f0f0",
-            title="Number of Customers"
-        ),
+        xaxis=dict(showgrid=False, title="Number of Orders", tickmode="linear"),
+        yaxis=dict(showgrid=True, gridcolor="#f0f0f0", title="Number of Customers"),
         height=300
     )
     st.plotly_chart(fig_dist, width="stretch")
