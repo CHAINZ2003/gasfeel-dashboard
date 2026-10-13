@@ -665,7 +665,7 @@ def render_segment_chart(full_df, view_df, freq, unit, key, tail=None):
     annotations = []
 
     # ---------------- segment arrows in the gaps ----------------
-    rx, ry = [], []
+    rope_lines = {UP_COLOR: ([], []), DOWN_COLOR: ([], []), FLAT_COLOR: ([], [])}
     for i in range(n - 1):
         a, b = periods[i], periods[i + 1]
         if b != a + 1:                      # only join consecutive periods
@@ -677,26 +677,32 @@ def render_segment_chart(full_df, view_df, freq, unit, key, tail=None):
             ya = bottoms[s_][a] + shares.loc[a, s_] / 2
             yb = bottoms[s_][b] + shares.loc[b, s_] / 2
             x0, x1 = xs[i] + half, xs[i + 1] - half
-            rx += [x0, x1, None]
-            ry += [ya, yb, None]
             ch = (vb - va) / va * 100
+            c = colour(ch)                  # green = up, red = down, grey = no change
+
+            rope_lines[c][0].extend([x0, x1, None])
+            rope_lines[c][1].extend([ya, yb, None])
+
             annotations.append(dict(                       # arrow head
                 x=x1, y=yb, ax=x1 - (x1 - x0) * 0.22, ay=yb - (yb - ya) * 0.22,
                 xref="x", yref="y", axref="x", ayref="y", text="",
                 showarrow=True, arrowhead=2, arrowsize=1.1, arrowwidth=1.6,
-                arrowcolor="#333333",
+                arrowcolor=c,
             ))
             annotations.append(dict(                       # % change label
                 x=(x0 + x1) / 2, y=(ya + yb) / 2, text=f"<b>{fmt(ch)}</b>",
-                showarrow=False, font=dict(size=fs_ch, color=colour(ch)),
+                showarrow=False, font=dict(size=fs_ch, color=c),
                 bgcolor="rgba(255,255,255,0.9)", borderpad=1,
             ))
-    if rx:
-        fig.add_trace(go.Scatter(
-            x=rx, y=ry, mode="lines", showlegend=False, hoverinfo="skip",
-            line=dict(color="#333333", width=1.3, dash="dash"),
-        ))
 
+    for c, (lx, ly) in rope_lines.items():             # one dashed trace per colour
+        if lx:
+            fig.add_trace(go.Scatter(
+                x=lx, y=ly, mode="lines", showlegend=False, hoverinfo="skip",
+                line=dict(color=c, width=1.4, dash="dash"),
+            ))
+
+            
     # ---------------- overall brackets along the top ----------------
     bx, by = [], []
     y_base, y_top = 102, 110
@@ -714,7 +720,7 @@ def render_segment_chart(full_df, view_df, freq, unit, key, tail=None):
             x=xs[i + 1], y=y_base, ax=xs[i + 1], ay=y_top - 1,
             xref="x", yref="y", axref="x", ayref="y", text="",
             showarrow=True, arrowhead=2, arrowsize=1.2, arrowwidth=1.8,
-            arrowcolor="#001f6e",
+                        arrowcolor=colour(ch),
         ))
         annotations.append(dict(                           # overall label
             x=(xs[i] + xs[i + 1]) / 2, y=y_top, text=f"<b>{fmt(ch)}</b>",
