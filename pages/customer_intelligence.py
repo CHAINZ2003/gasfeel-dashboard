@@ -533,6 +533,218 @@ def build_active_base(full_df, view_df, freq, max_periods):
 
 
 # ============================================================
+# CUSTOMER MIX CHART — stacked bars with "rope" connectors
+# Each bar = all customers active in that period, split into
+# New / Returning x Gas / Petrol (/ Other).
+# A customer is placed in ONE segment per period, based on the
+# product they ordered most in that period (ties -> higher revenue),
+# so the bar total always equals Total Active.
+# Ropes between neighbouring bars show the % change of each segment;
+# the rope along the top shows the % change of the overall total.
+# ============================================================
+SEGMENT_STACK = [
+    ("Returning", "Gas"), ("Returning", "Petrol"), ("Returning", "Other"),
+    ("New", "Gas"), ("New", "Petrol"), ("New", "Other"),
+]
+SEGMENT_STYLE = {   # (fill colour, text colour)
+    ("Returning", "Gas"):    ("#8fb0ff", "#111111"),
+    ("Returning", "Petrol"): ("#f7c37a", "#111111"),
+    ("Returning", "Other"):  ("#cfcfcf", "#111111"),
+    ("New", "Gas"):          ("#1f4fbf", "#ffffff"),
+    ("New", "Petrol"):       ("#d96c00", "#ffffff"),
+    ("New", "Other"):        ("#666666", "#ffffff"),
+}
+UP_COLOR, DOWN_COLOR, FLAT_COLOR = "#0a8a3a", "#cc0000", "#666666"
+
+
+def product_bucket(series):
+    s = series.astype(str).str.lower()
+    out = pd.Series("Other", index=series.index)
+    out[s.str.contains("gas", na=False)] = "Gas"
+    out[s.str.contains("petrol|pms", na=False)] = "Petrol"
+    return out
+
+
+def build_segments(full_df, view_df, freq):
+    full = add_customer_key(full_df)
+    if full.empty:
+        return None
+
+    full["_period"] = full["Date of Order"].dt.to_period(freq)
+    full["_bucket"] = product_bucket(full["Order Type"])
+    if "Revenue" not in full.columns:
+        full["Revenue"] = 0
+    first_period = full.groupby("_key")["_period"].min()
+
+    g = (
+        full.groupby(["_period", "_key", "_bucket"])
+        .agg(n=("_key", "size"), rev=("Revenue", "sum"))
+        .reset_index()
+        .sort_values(["_period", "_key", "n", "rev"],
+                     ascending=[True, True, False, False])
+        .drop_duplicates(["_period", "_key"])
+    )
+    g["_status"] = (g["_period"] == g["_key"].map(first_period)).map(
+        {True: "New", False: "Returning"}
+    )
+
+    seg = (
+        g.groupby(["_period", "_status", "_bucket"]).size()
+        .unstack(["_status", "_bucket"], fill_value=0)
+    )
+    cols = [c for c in SEGMENT_STACK if c in seg.columns]
+    seg = seg[cols].sort_index()
+
+    view = pd.to_datetime(view_df["Date of Order"], errors="coerce").dropna()
+    if not view.empty:
+        seg = seg[seg.index.isin(view.dt.to_period(freq).unique())]
+
+    return seg if not seg.empty else None
+
+
+def render_segment_chart(full_df, view_df, freq, unit, key, tail=None):
+
+    seg = build_segments(full_df, view_df, freq)
+    if seg is None:
+        st.info("No data for the selected period.")
+        return
+    if tail:
+        seg = seg.tail(tail)
+
+    periods = list(seg.index)
+    n = len(periods)
+    xs = list(range(n))
+    segs = list(seg.columns)
+    totals = seg.sum(axis=1)
+    shares = seg.div(totals, axis=0) * 100        # every bar = 100%
+    half = 0.25                                   # bar half-width (gap = 0.5)
+    dec = 0 if n > 8 else 1                       # fewer decimals when crowded
+    fs_in = 10 if n <= 8 else 8                   # in-bar font size
+    fs_ch = 10 if n <= 8 else 8                   # rope label font size
+
+    if freq == "W":
+        names = [f"Wk {p.start_time:%d %b}" for p in periods]
+    else:
+        names = [p.strftime("%b %Y") for p in periods]
+    ticks = [f"<b>{names[i]}</b><br>{int(totals[p]):,} active"
+             for i, p in enumerate(periods)]
+
+    # bottom of every segment (in % of the bar)
+    bottoms, running = {}, pd.Series(0.0, index=seg.index)
+    for s_ in segs:
+        bottoms[s_] = running.copy()
+        running = running + shares[s_]
+
+    def fmt(ch):
+        return f"{ch:+.{dec}f}%"
+
+    def colour(ch):
+        return UP_COLOR if ch > 0 else (DOWN_COLOR if ch < 0 else FLAT_COLOR)
+
+    fig = go.Figure()
+
+    # ---------------- 100% stacked bars ----------------
+    for s_ in segs:
+        fill, txt = SEGMENT_STYLE[s_]
+        label = f"{s_[0]} – {s_[1]}"
+        text, hover = [], []
+        for i, p in enumerate(periods):
+            v = int(seg.loc[p, s_])
+            sh = shares.loc[p, s_]
+            hover.append(f"{names[i]} · {label}<br>{v:,} customers "
+                         f"({sh:.0f}% of {int(totals[p]):,})")
+            text.append(f"{v:,}<br>({sh:.0f}%)" if sh >= 4 else "")
+        fig.add_trace(go.Bar(
+            x=xs, y=shares[s_].values, width=2 * half, name=label,
+            marker=dict(color=fill, line=dict(color="white", width=1)),
+            text=text, textposition="inside", insidetextanchor="middle",
+            textfont=dict(size=fs_in, color=txt),
+            hovertext=hover, hovertemplate="%{hovertext}<extra></extra>",
+        ))
+
+    annotations = []
+
+    # ---------------- segment arrows in the gaps ----------------
+    rx, ry = [], []
+    for i in range(n - 1):
+        a, b = periods[i], periods[i + 1]
+        if b != a + 1:                      # only join consecutive periods
+            continue
+        for s_ in segs:
+            va, vb = float(seg.loc[a, s_]), float(seg.loc[b, s_])
+            if va == 0:
+                continue
+            ya = bottoms[s_][a] + shares.loc[a, s_] / 2
+            yb = bottoms[s_][b] + shares.loc[b, s_] / 2
+            x0, x1 = xs[i] + half, xs[i + 1] - half
+            rx += [x0, x1, None]
+            ry += [ya, yb, None]
+            ch = (vb - va) / va * 100
+            annotations.append(dict(                       # arrow head
+                x=x1, y=yb, ax=x1 - (x1 - x0) * 0.22, ay=yb - (yb - ya) * 0.22,
+                xref="x", yref="y", axref="x", ayref="y", text="",
+                showarrow=True, arrowhead=2, arrowsize=1.1, arrowwidth=1.6,
+                arrowcolor="#333333",
+            ))
+            annotations.append(dict(                       # % change label
+                x=(x0 + x1) / 2, y=(ya + yb) / 2, text=f"<b>{fmt(ch)}</b>",
+                showarrow=False, font=dict(size=fs_ch, color=colour(ch)),
+                bgcolor="rgba(255,255,255,0.9)", borderpad=1,
+            ))
+    if rx:
+        fig.add_trace(go.Scatter(
+            x=rx, y=ry, mode="lines", showlegend=False, hoverinfo="skip",
+            line=dict(color="#333333", width=1.3, dash="dash"),
+        ))
+
+    # ---------------- overall brackets along the top ----------------
+    bx, by = [], []
+    y_base, y_top = 102, 110
+    for i in range(n - 1):
+        a, b = periods[i], periods[i + 1]
+        if b != a + 1:
+            continue
+        ta, tb = float(totals[a]), float(totals[b])
+        if ta == 0:
+            continue
+        bx += [xs[i], xs[i], xs[i + 1], xs[i + 1], None]
+        by += [y_base, y_top, y_top, y_base + 1.5, None]
+        ch = (tb - ta) / ta * 100
+        annotations.append(dict(                           # arrow head
+            x=xs[i + 1], y=y_base, ax=xs[i + 1], ay=y_top - 1,
+            xref="x", yref="y", axref="x", ayref="y", text="",
+            showarrow=True, arrowhead=2, arrowsize=1.2, arrowwidth=1.8,
+            arrowcolor="#001f6e",
+        ))
+        annotations.append(dict(                           # overall label
+            x=(xs[i] + xs[i + 1]) / 2, y=y_top, text=f"<b>{fmt(ch)}</b>",
+            showarrow=False, font=dict(size=fs_ch + 1, color=colour(ch)),
+            bgcolor="white", bordercolor=colour(ch), borderwidth=1, borderpad=2,
+        ))
+    if bx:
+        fig.add_trace(go.Scatter(
+            x=bx, y=by, mode="lines", showlegend=False, hoverinfo="skip",
+            line=dict(color="#001f6e", width=1.8),
+        ))
+
+    fig.update_layout(
+        barmode="stack", bargap=0,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=10, r=10, t=40, b=10),
+        xaxis=dict(tickmode="array", tickvals=xs, ticktext=ticks,
+                   range=[-0.6, n - 0.4], showgrid=False, title="",
+                   tickfont=dict(size=11, color="#222222")),
+        yaxis=dict(range=[0, 116], showgrid=False, showticklabels=False,
+                   zeroline=False, title=""),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0,
+                    xanchor="center", x=0.5),
+        annotations=annotations,
+        height=620,
+    )
+    st.plotly_chart(fig, use_container_width=True, key=key)
+
+
+# ============================================================
 # RETENTION DISPLAY (shared by monthly and weekly)
 # ============================================================
 def render_active_views(counts, new, unit, zero_label, heat_height, key):
@@ -687,6 +899,23 @@ def render_retention_cohort(orders_df, full_orders_df=None):
     st.markdown("<br>", unsafe_allow_html=True)
 
     st.markdown(
+        "<div class='section-title'>📊 Customer Mix & Change: Month to Month</div>",
+        unsafe_allow_html=True
+    )
+    chart_note(
+        "Every bar is 100% of the customers active that month (the number under "
+        "the month name is the total). It is split into New and Returning, for "
+        "Gas and Petrol; a customer is counted under the product they ordered "
+        "most that month. Each segment shows its customer count and its share "
+        "of the bar. The dashed arrows between bars show how many more or fewer "
+        "customers that segment has than the month before (% change in count). "
+        "The bracket along the top shows the % change in total active customers. "
+        "Hover any segment for details."
+    )
+    render_segment_chart(full_orders_df, orders_df, "M", "Month", key="monthly_segment_chart")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
         "<div class='section-title'>📋 Month-on-Month Retention Table</div>",
         unsafe_allow_html=True
     )
@@ -717,6 +946,20 @@ def render_retention_cohort(orders_df, full_orders_df=None):
         st.dataframe(w_summary.tail(12), use_container_width=True)
     else:
         st.info("No weekly data for the selected period.")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
+        "<div class='section-title'>📊 Customer Mix & Change: Week to Week</div>",
+        unsafe_allow_html=True
+    )
+    chart_note(
+        "Same chart by week (latest 12 weeks in the selected period). "
+        "Dashed arrows show the % change in each segment's customer count from "
+        "one week to the next; the bracket on top shows the change in total "
+        "active customers."
+    )
+    render_segment_chart(full_orders_df, orders_df, "W", "Week",
+                         key="weekly_segment_chart", tail=12)
     st.markdown("<br>", unsafe_allow_html=True)
 
     st.markdown(
