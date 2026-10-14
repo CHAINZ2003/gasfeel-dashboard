@@ -489,7 +489,7 @@ def new_vs_returning_summary(full_df, view_df, freq):
 # has ever ordered (the At-Risk bucket then only ever grows).
 # ============================================================
 YEAR_START    = pd.Timestamp("2026-01-01")
-LOOKBACK_DAYS = 90
+LOOKBACK_DAYS = 60
 SIDE_BY_SIDE  = True      # False = stack the Petrol and Gas charts vertically
 
 RECENCY_BUCKETS = {
