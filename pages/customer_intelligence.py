@@ -489,23 +489,43 @@ def new_vs_returning_summary(full_df, view_df, freq):
 # has ever ordered (the At-Risk bucket then only ever grows).
 # ============================================================
 YEAR_START    = pd.Timestamp("2026-01-01")
-LOOKBACK_DAYS = 60
+LOOKBACK_DAYS = None
 SIDE_BY_SIDE  = True      # False = stack the Petrol and Gas charts vertically
 
-RECENCY_BUCKETS = {
+# After this many days without an order the customer moves from At-Risk
+# to "Lapsed" (a separate grey slice). Use None for a product to keep
+# At-Risk open-ended for it, or LAPSED_AFTER = None to turn Lapsed off.
+LAPSED_AFTER = {"Petrol": 60, "Gas": 90}
+
+_BASE_BUCKETS = {
     "Petrol": [("Hyper-Active", 0, 7),  ("Active", 8, 14),
                ("Slipping", 15, 30),    ("At-Risk", 31, None)],
     "Gas":    [("Hyper-Active", 0, 14), ("Active", 15, 30),
                ("Slipping", 31, 45),    ("At-Risk", 46, None)],
 }
-BUCKET_ORDER = ["Hyper-Active", "Active", "Slipping", "At-Risk"]
+
+
+def _make_buckets():
+    out = {}
+    for prod, defs in _BASE_BUCKETS.items():
+        limit = (LAPSED_AFTER or {}).get(prod)
+        if limit:
+            defs = defs[:-1] + [("At-Risk", defs[-1][1], limit),
+                                ("Lapsed", limit + 1, None)]
+        out[prod] = defs
+    return out
+
+
+RECENCY_BUCKETS = _make_buckets()
+BUCKET_ORDER = ["Hyper-Active", "Active", "Slipping", "At-Risk", "Lapsed"]
 BUCKET_STYLE = {          # (fill colour, text colour)
     "Hyper-Active": ("#0b3d91", "#ffffff"),
     "Active":       ("#6fa8ff", "#111111"),
     "Slipping":     ("#f0a500", "#111111"),
     "At-Risk":      ("#c0392b", "#ffffff"),
+    "Lapsed":       ("#7f8c8d", "#ffffff"),
 }
-BAD_WHEN_UP = {"At-Risk"}   # for these buckets an increase is shown RED
+BAD_WHEN_UP = {"At-Risk", "Lapsed"}   # for these buckets an increase is shown RED
 UP_COLOR, DOWN_COLOR, FLAT_COLOR = "#0a8a3a", "#cc0000", "#666666"
 
 # Background phases (month numbers of 2026): label, first month, last month, tint
@@ -799,9 +819,16 @@ def _recency_insight_lines(product, result, full_df, today):
         f"<b>{product}:</b> the base peaked at <b>{peak:,}</b> customers in "
         f"{peak_p.strftime('%b')} and is <b>{last:,}</b> now "
         f"({last_p.strftime('%b')}), a change of <b>{chg:+.0f}%</b>. "
-        f"At-Risk grew from {ar_peak:,} at the peak to {ar_last:,} "
+        f"At-Risk went from {ar_peak:,} at the peak to {ar_last:,} "
         f"({ar_last / last * 100 if last else 0:.0f}% of today's base)."
     ]
+    if "Lapsed" in counts.columns:
+        lap = int(counts.loc[last_p, "Lapsed"])
+        limit = LAPSED_AFTER.get(product)
+        parts.append(
+            f"{lap:,} customers ({lap / last * 100 if last else 0:.0f}%) have "
+            f"lapsed (no {product.lower()} order for {limit}+ days)."
+        )
 
     jul, aug, sep = (pd.Period("2026-07", "M"), pd.Period("2026-08", "M"),
                      pd.Period("2026-09", "M"))
@@ -912,7 +939,10 @@ def render_retention_cohort(orders_df, full_orders_df=None):
             "Arrows between bars show the % change of each bucket (green = "
             "healthier, red = worse; for At-Risk an increase is red). The "
             "bracket on top shows the month-over-month change of the whole "
-            "base. Thick dark-red arrows show the bleed: Hyper-Active/Active "
+            "base. Lapsed (grey) = customers past the Lapsed limit with no order "
+            "(60+ days for Petrol, 90+ for Gas); it is kept apart from At-Risk so "
+            "At-Risk stays the win-back list. "
+            "Thick dark-red arrows show the bleed: Hyper-Active/Active "
             "customers in July who were At-Risk the next month, and August to "
             "September. Jan–Mar are understated in the older buckets because "
             "order data starts on 1 Jan. Only Petrol and Gas orders are "
