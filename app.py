@@ -247,6 +247,17 @@ st.markdown("""
         color: #333333 !important;
     }
 
+    /* Hover tooltips: white box, dark text, readable on every chart */
+    .js-plotly-plot .hoverlayer .hovertext path {
+        fill: #ffffff !important;
+        fill-opacity: 1 !important;
+        stroke: #003399 !important;
+    }
+    .js-plotly-plot .hoverlayer .hovertext text {
+        fill: #111111 !important;
+    }
+
+
     /* ---- MAIN CONTENT ---- */
     .main .block-container {
         padding: 20px 28px !important;

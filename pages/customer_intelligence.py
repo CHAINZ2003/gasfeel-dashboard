@@ -894,6 +894,419 @@ def _bleed_table(result):
 
 
 # ============================================================
+# ACTIVE-BASE RETENTION — separate for Petrol and Gas
+# Base for each period = every customer who ordered THAT product in the
+# period (new + returning). Period +N = how many of those same customers
+# ordered that product again N periods later. Built from the full order
+# history, so the base never changes with the filters; the filter only
+# chooses which periods are shown.
+#   counts : rows = period, cols = 0..max_periods
+#            NaN = period not happened yet, 0 = nobody came back
+#   new    : how many of the base ordered this product for the first time
+# ============================================================
+def build_active_base_product(full_df, view_df, product, freq, max_periods):
+
+    full = add_customer_key(full_df)
+    if full.empty:
+        return None, None
+    full = full[product_bucket(full["Order Type"]) == product]
+    if full.empty:
+        return None, None
+
+    full["_period"] = full["Date of Order"].dt.to_period(freq)
+
+    first_period  = full.groupby("_key")["_period"].min()
+    new_by_period = first_period.value_counts()
+    active_sets   = full.groupby("_period")["_key"].apply(set).to_dict()
+
+    all_periods = pd.period_range(full["_period"].min(), full["_period"].max(), freq=freq)
+    current_period = pd.Timestamp.now().to_period(freq)
+
+    rows = {}
+    for p in all_periods:
+        base = active_sets.get(p, set())
+        row = {}
+        for n in range(0, max_periods + 1):
+            target = p + n
+            if target > current_period:
+                row[n] = float("nan")              # not happened yet
+            elif n == 0:
+                row[n] = len(base)
+            else:
+                row[n] = len(base & active_sets.get(target, set()))
+        rows[p] = row
+
+    counts = pd.DataFrame.from_dict(rows, orient="index")
+    new = new_by_period.reindex(counts.index).fillna(0).astype(int)
+
+    view = pd.to_datetime(view_df["Date of Order"], errors="coerce").dropna()
+    if not view.empty:
+        counts = counts[counts.index.isin(view.dt.to_period(freq).unique())]
+
+    counts = counts[counts[0] > 0]
+    new = new.loc[counts.index]
+
+    if counts.empty:
+        return None, None
+    return counts, new
+
+
+def render_active_views(counts, new, unit, zero_label, heat_height, key, heatmap=True):
+
+    sizes = counts[0].astype(int)
+    pct   = counts.divide(sizes, axis=0) * 100
+    cols  = list(counts.columns)
+
+    def col_name(p):
+        return zero_label if p == 0 else f"{unit} +{int(p)}"
+
+    # ---------------- TABLE ----------------
+    rows = []
+    for period in counts.index:
+        base = int(sizes[period])
+        row = {
+            "Period": str(period),
+            "Total Active (Base)": base,
+            "New": int(new[period]),
+            "Returning": base - int(new[period]),
+        }
+        for p in cols:
+            c = counts.loc[period, p]
+            if pd.isna(c):
+                row[col_name(p)] = ""
+            elif p == 0:
+                row[col_name(p)] = f"{int(c)} (100%)"
+            else:
+                row[col_name(p)] = f"{int(c)}/{base} ({pct.loc[period, p]:.0f}%)"
+        rows.append(row)
+
+    avg_row = {
+        "Period": "WEIGHTED AVG",
+        "Total Active (Base)": int(sizes.sum()),
+        "New": int(new.sum()),
+        "Returning": int(sizes.sum() - new.sum()),
+    }
+    for p in cols:
+        eligible = counts[p].notna()
+        if p == 0:
+            avg_row[col_name(p)] = "100%"
+        elif eligible.any() and sizes[eligible].sum() > 0:
+            avg = counts.loc[eligible, p].sum() / sizes[eligible].sum() * 100
+            avg_row[col_name(p)] = f"{avg:.0f}%"
+        else:
+            avg_row[col_name(p)] = ""
+    rows.append(avg_row)
+
+    st.dataframe(pd.DataFrame(rows).set_index("Period"), use_container_width=True)
+
+    if not heatmap:
+        return
+
+    # ---------------- HEATMAP ----------------
+    labels, hover = [], []
+    for period in counts.index:
+        base = int(sizes[period])
+        r_lab, r_hov = [], []
+        for p in cols:
+            c = counts.loc[period, p]
+            if pd.isna(c):
+                r_lab.append("")
+                r_hov.append("Not enough time has passed yet")
+            else:
+                r_lab.append(f"{int(c)}<br>({pct.loc[period, p]:.0f}%)")
+                r_hov.append(f"{int(c)} of {base} active customers ({pct.loc[period, p]:.0f}%)")
+        labels.append(r_lab)
+        hover.append(r_hov)
+
+    fig = go.Figure(data=go.Heatmap(
+        z=pct.values,
+        x=[col_name(p) for p in cols],
+        y=[f"{p}  (n={int(sizes[p])})" for p in counts.index],
+        colorscale=[[0, "#fff0f0"], [0.3, "#ccd9ff"], [0.6, "#8fb0ff"], [1, "#4d79d9"]],
+        zmin=0, zmax=100,
+        text=labels, texttemplate="%{text}",
+        textfont=dict(size=9, color="#111111"),
+        hovertext=hover,
+        hovertemplate="%{y}<br>%{x}<br>%{hovertext}<extra></extra>",
+        showscale=False, xgap=2, ygap=2,
+    ))
+    fig.update_layout(
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=10, r=10, t=20, b=10),
+        xaxis=dict(title=f"{unit}s after the active {unit.lower()}", side="top"),
+        yaxis=dict(title="Active period (n = active customers)", autorange="reversed"),
+        height=heat_height,
+    )
+    st.plotly_chart(fig, use_container_width=True, key=key)
+
+
+# ============================================================
+# RETENTION FLOW CHART — same style as the Active Base Movement chart
+# Each bar = everyone who ordered THAT product in the period (100% tall),
+# split into:
+#   Retained         = also ordered in the previous period
+#   Back after a gap = ordered before, but not in the previous period
+#   New              = first-ever order of that product in this period
+# Arrows between bars show the % change of each segment; the bracket on
+# top shows the change of the whole active base. Under each bar:
+# active customers and "% kept" = Retained / previous period's base.
+# Built from full history, so the filter only chooses which bars show.
+# ============================================================
+FLOW_SEGMENTS = [   # (name, fill colour, text colour) — bottom to top
+    ("Retained",         "#0b3d91", "#ffffff"),
+    ("Back after a gap", "#6fa8ff", "#111111"),
+    ("New",              "#2e9e5b", "#ffffff"),
+]
+
+
+def build_flow(full_df, view_df, product, freq):
+    full = add_customer_key(full_df)
+    if full.empty:
+        return None
+    full = full[product_bucket(full["Order Type"]) == product]
+    if full.empty:
+        return None
+
+    full["_period"] = full["Date of Order"].dt.to_period(freq)
+    first = full.groupby("_key")["_period"].min().to_dict()
+    sets  = full.groupby("_period")["_key"].apply(set).to_dict()
+    periods = pd.period_range(full["_period"].min(), full["_period"].max(), freq=freq)
+
+    rows, prev = {}, set()
+    for p in periods:
+        cur = sets.get(p, set())
+        new = {k for k in cur if first[k] == p}
+        retained = cur & prev
+        back = cur - prev - new
+        rows[p] = {
+            "Retained": len(retained), "Back after a gap": len(back),
+            "New": len(new), "base": len(cur),
+            "prev_base": len(prev), "lost": len(prev - cur),
+        }
+        prev = cur
+
+    flow = pd.DataFrame.from_dict(rows, orient="index")
+
+    view = pd.to_datetime(view_df["Date of Order"], errors="coerce").dropna()
+    if not view.empty:
+        flow = flow[flow.index.isin(view.dt.to_period(freq).unique())]
+    flow = flow[flow["base"] > 0]
+    return flow if not flow.empty else None
+
+
+def render_flow_chart(flow, freq, unit, key):
+
+    periods = list(flow.index)
+    n = len(periods)
+    xs = list(range(n))
+    seg_names = [s[0] for s in FLOW_SEGMENTS]
+    counts = flow[seg_names]
+    totals = flow["base"]
+    shares = counts.div(totals.replace(0, np.nan), axis=0).fillna(0) * 100
+    M = 100.0
+    half = 0.22
+    current = pd.Timestamp.now().to_period(freq)
+
+    ticks = []
+    for p in periods:
+        lab = f"Wk {p.start_time:%d %b}" if freq == "W" else p.strftime("%b")
+        if p == current:
+            lab += "*"
+        pb = flow.loc[p, "prev_base"]
+        kept = (f"{flow.loc[p, 'Retained'] / pb * 100:.0f}% kept" if pb
+                else "first period")
+        ticks.append(f"<b>{lab}</b><br>{int(totals[p]):,} active<br>{kept}")
+
+    bottoms, running = {}, pd.Series(0.0, index=flow.index)
+    for nm in seg_names:
+        bottoms[nm] = running.copy()
+        running = running + shares[nm]
+
+    fig = go.Figure()
+    annotations = []
+
+    # ---------------- background phases (monthly only) ----------------
+    if freq == "M":
+        for label, m0, m1, tint in PHASES:
+            idx = [i for i, p in enumerate(periods) if m0 <= p.month <= m1]
+            if not idx:
+                continue
+            x0 = -0.6 if idx[0] == 0 else idx[0] - 0.5
+            x1 = n - 0.4 if idx[-1] == n - 1 else idx[-1] + 0.5
+            fig.add_vrect(x0=x0, x1=x1, fillcolor=tint, line_width=0, layer="below")
+            annotations.append(dict(
+                x=(x0 + x1) / 2, y=M * 1.28, text=f"<b>{label}</b>", showarrow=False,
+                font=dict(size=9, color="#444444"),
+            ))
+
+    # ---------------- stacked bars ----------------
+    for nm, fill, txt in FLOW_SEGMENTS:
+        label = f"{nm} (also ordered last {unit.lower()})" if nm == "Retained" else nm
+        text, hover = [], []
+        for p in periods:
+            v = int(counts.loc[p, nm])
+            sh = shares.loc[p, nm]
+            hover.append(
+                f"{ticks[periods.index(p)].split('<br>')[0].replace('<b>', '').replace('</b>', '')}"
+                f" · {nm}<br>{v:,} customers ({sh:.0f}% of {int(totals[p]):,})"
+                f"<br>Lost since last {unit.lower()}: {int(flow.loc[p, 'lost']):,}"
+            )
+            text.append(f"{v:,}<br>({sh:.0f}%)" if sh >= 6 else "")
+        fig.add_trace(go.Bar(
+            x=xs, y=shares[nm].values, width=2 * half, name=label,
+            marker=dict(color=fill, line=dict(color="white", width=1)),
+            text=text, textposition="inside", insidetextanchor="middle",
+            textfont=dict(size=8, color=txt),
+            hovertext=hover, hovertemplate="%{hovertext}<extra></extra>",
+        ))
+
+    # ---------------- same-segment arrows between neighbouring bars ----------------
+    rope = {UP_COLOR: ([], []), DOWN_COLOR: ([], []), FLAT_COLOR: ([], [])}
+    for i in range(n - 1):
+        a, b = periods[i], periods[i + 1]
+        if b != a + 1:
+            continue
+        for nm in seg_names:
+            va, vb = float(counts.loc[a, nm]), float(counts.loc[b, nm])
+            if va == 0:
+                continue
+            ya = bottoms[nm][a] + shares.loc[a, nm] / 2
+            yb = bottoms[nm][b] + shares.loc[b, nm] / 2
+            x0, x1 = xs[i] + half, xs[i + 1] - half
+            ch = (vb - va) / va * 100
+            c = change_colour(ch)
+            rope[c][0].extend([x0, x1, None])
+            rope[c][1].extend([ya, yb, None])
+            annotations.append(dict(
+                x=x1, y=yb, ax=x1 - (x1 - x0) * 0.25, ay=yb - (yb - ya) * 0.25,
+                xref="x", yref="y", axref="x", ayref="y", text="",
+                showarrow=True, arrowhead=2, arrowsize=1.0, arrowwidth=1.4,
+                arrowcolor=c,
+            ))
+            annotations.append(dict(
+                x=(x0 + x1) / 2, y=(ya + yb) / 2, text=f"<b>{ch:+.0f}%</b>",
+                showarrow=False, font=dict(size=8, color=c),
+                bgcolor="rgba(255,255,255,0.9)", borderpad=1,
+            ))
+    for c, (lx, ly) in rope.items():
+        if lx:
+            fig.add_trace(go.Scatter(
+                x=lx, y=ly, mode="lines", showlegend=False, hoverinfo="skip",
+                line=dict(color=c, width=1.2, dash="dash"),
+            ))
+
+    # ---------------- overall brackets along the top ----------------
+    bx, by = [], []
+    y_top = M * 1.12
+    for i in range(n - 1):
+        a, b = periods[i], periods[i + 1]
+        if b != a + 1:
+            continue
+        ta, tb = float(totals[a]), float(totals[b])
+        if ta == 0:
+            continue
+        xa, xb = xs[i] + 0.08, xs[i + 1] - 0.08
+        bx += [xa, xa, xb, None]
+        by += [M * 1.02, y_top, y_top, None]
+        ch = (tb - ta) / ta * 100
+        c = change_colour(ch)
+        annotations.append(dict(
+            x=xb, y=M * 1.02, ax=xb, ay=y_top,
+            xref="x", yref="y", axref="x", ayref="y", text="",
+            showarrow=True, arrowhead=2, arrowsize=1.2, arrowwidth=1.8,
+            arrowcolor=c,
+        ))
+        annotations.append(dict(
+            x=(xa + xb) / 2, y=y_top, text=f"<b>{ch:+.1f}%</b>", showarrow=False,
+            font=dict(size=9, color=c), bgcolor="white",
+            bordercolor=c, borderwidth=1, borderpad=2,
+        ))
+    if bx:
+        fig.add_trace(go.Scatter(
+            x=bx, y=by, mode="lines", showlegend=False, hoverinfo="skip",
+            line=dict(color="#001f6e", width=1.6),
+        ))
+
+    fig.update_layout(
+        barmode="stack", bargap=0,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=10, r=10, t=30, b=10),
+        xaxis=dict(tickmode="array", tickvals=xs, ticktext=ticks,
+                   range=[-0.6, n - 0.4], showgrid=False, title="",
+                   tickfont=dict(size=10, color="#222222")),
+        yaxis=dict(title="Share of active base", range=[0, M * 1.34],
+                   tickvals=[0, 25, 50, 75, 100], ticksuffix="%",
+                   showgrid=True, gridcolor="#f0f0f0", zeroline=False),
+        legend=dict(orientation="h", yanchor="top", y=-0.16,
+                    xanchor="center", x=0.5, font=dict(size=10)),
+        annotations=annotations,
+        height=640,
+    )
+    st.plotly_chart(fig, use_container_width=True, key=key)
+
+
+def render_product_retention(orders_df, full_orders_df):
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-title'>🔁 Retention (Active Base) — Petrol & Gas</div>",
+        unsafe_allow_html=True
+    )
+    chart_note(
+        "Each bar = everyone who ordered THAT product in the month or week (the "
+        "number under it), scaled to 100%. Dark blue = Retained (also ordered "
+        "in the previous period), light blue = Back after a gap (ordered "
+        "before, but skipped the previous period), green = New (first ever "
+        "order of that product). '% kept' under each bar = Retained divided by "
+        "the previous period's active base. Dashed arrows show the % change in "
+        "customer count of each segment; the bracket on top shows the change "
+        "of the whole base. Hover a segment for counts and how many customers "
+        "were lost since the last period. * = current period, still in "
+        "progress, so it understates retention. The base never changes with "
+        "the filter; the filter only chooses which bars show. A customer who "
+        "buys both products appears in both charts."
+    )
+
+    sections = [
+        ("M", "Month", "Month 0 (Active)", 9,  None, "📋 Month-on-Month Retention"),
+        ("W", "Week",  "Week 0 (Active)",  8,  12,   "📅 Week-by-Week Retention (latest 12 weeks)"),
+    ]
+    for freq, unit, zero_label, max_p, tail, heading in sections:
+        st.markdown(f"<div class='section-title'>{heading}</div>", unsafe_allow_html=True)
+        cols = st.columns(2) if SIDE_BY_SIDE else [st.container(), st.container()]
+        for col, product in zip(cols, ["Petrol", "Gas"]):
+            with col:
+                st.markdown(f"**{'⛽' if product == 'Petrol' else '🔥'} {product}**")
+                flow = build_flow(full_orders_df, orders_df, product, freq)
+                if flow is None:
+                    st.info(f"No {product} data for the selected period.")
+                    continue
+                if tail:
+                    flow = flow.tail(tail)
+                render_flow_chart(flow, freq, unit, key=f"flow_{product.lower()}_{freq}")
+
+        with st.expander(f"Show detailed {unit} +1, +2, +3 retention tables"):
+            tcols = st.columns(2) if SIDE_BY_SIDE else [st.container(), st.container()]
+            for col, product in zip(tcols, ["Petrol", "Gas"]):
+                with col:
+                    st.markdown(f"**{product}**")
+                    counts, new = build_active_base_product(
+                        full_orders_df, orders_df, product, freq, max_p
+                    )
+                    if counts is None:
+                        st.info(f"No {product} data for the selected period.")
+                        continue
+                    if tail:
+                        counts = counts.tail(tail)
+                        new = new.loc[counts.index]
+                    render_active_views(
+                        counts, new, unit, zero_label, heat_height=300,
+                        key=f"retention_{product.lower()}_{freq}", heatmap=False
+                    )
+        st.markdown("<br>", unsafe_allow_html=True)
+
+
+# ============================================================
 # RETENTION SECTION (keeps the same function name used by app.py)
 #   orders_df       = filtered orders (only used for the New vs Returning tables)
 #   full_orders_df  = ALL orders, unfiltered (used for the Active Base charts)
@@ -984,6 +1397,8 @@ def render_retention_cohort(orders_df, full_orders_df=None):
                 if results[product] is not None:
                     st.dataframe(_bleed_table(results[product]),
                                  use_container_width=True)
+
+    render_product_retention(orders_df, full_orders_df)
 
     # ================= NEW vs RETURNING =================
     st.markdown("<br>", unsafe_allow_html=True)
