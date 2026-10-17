@@ -1276,7 +1276,7 @@ def render_product_retention(orders_df, full_orders_df):
         cols = st.columns(2) if SIDE_BY_SIDE else [st.container(), st.container()]
         for col, product in zip(cols, ["Petrol", "Gas"]):
             with col:
-                st.markdown(f"**{'⛽' if product == 'Petrol' else '🔥'} {product}**")
+                st.markdown(f"**{'⛽ PETROL' if product == 'Petrol' else '🔥GAS'} {product}**")
                 flow = build_flow(full_orders_df, orders_df, product, freq)
                 if flow is None:
                     st.info(f"No {product} data for the selected period.")
@@ -1370,7 +1370,7 @@ def render_retention_cohort(orders_df, full_orders_df=None):
         for col, product in zip(cols, ["Petrol", "Gas"]):
             with col:
                 st.markdown(
-                    f"<div class='section-title'>{'⛽' if product == 'Petrol' else '🔥'} "
+                    f"<div class='section-title'>{'⛽ PETROL' if product == 'Petrol' else '🔥 GAS'} "
                     f"{product} Active Base</div>",
                     unsafe_allow_html=True
                 )
