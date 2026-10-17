@@ -1059,6 +1059,16 @@ FLOW_SEGMENTS = [   # (name, fill colour, text colour) — bottom to top
 ]
 
 
+def product_heading(product):
+    """Dark-blue product label that stays readable on the light dashboard."""
+    icon = "⛽" if product == "Petrol" else "🔥"
+    st.markdown(
+        f"<div style='color:#001f6e;font-size:15px;font-weight:800;"
+        f"margin:6px 0 8px 0;'>{icon} {product}</div>",
+        unsafe_allow_html=True
+    )
+
+
 def build_flow(full_df, view_df, product, freq):
     full = add_customer_key(full_df)
     if full.empty:
@@ -1276,7 +1286,7 @@ def render_product_retention(orders_df, full_orders_df):
         cols = st.columns(2) if SIDE_BY_SIDE else [st.container(), st.container()]
         for col, product in zip(cols, ["Petrol", "Gas"]):
             with col:
-                st.markdown(f"**{'⛽ PETROL' if product == 'Petrol' else '🔥GAS'} {product}**")
+                product_heading(product)
                 flow = build_flow(full_orders_df, orders_df, product, freq)
                 if flow is None:
                     st.info(f"No {product} data for the selected period.")
@@ -1289,7 +1299,7 @@ def render_product_retention(orders_df, full_orders_df):
             tcols = st.columns(2) if SIDE_BY_SIDE else [st.container(), st.container()]
             for col, product in zip(tcols, ["Petrol", "Gas"]):
                 with col:
-                    st.markdown(f"**{product}**")
+                    product_heading(product)
                     counts, new = build_active_base_product(
                         full_orders_df, orders_df, product, freq, max_p
                     )
@@ -1370,7 +1380,7 @@ def render_retention_cohort(orders_df, full_orders_df=None):
         for col, product in zip(cols, ["Petrol", "Gas"]):
             with col:
                 st.markdown(
-                    f"<div class='section-title'>{'⛽ PETROL' if product == 'Petrol' else '🔥 GAS'} "
+                    f"<div class='section-title'>{'⛽' if product == 'Petrol' else '🔥'} "
                     f"{product} Active Base</div>",
                     unsafe_allow_html=True
                 )
@@ -1393,7 +1403,7 @@ def render_retention_cohort(orders_df, full_orders_df=None):
         tcols = st.columns(2) if SIDE_BY_SIDE else [st.container(), st.container()]
         for col, product in zip(tcols, ["Petrol", "Gas"]):
             with col:
-                st.markdown(f"**{product}**")
+                product_heading(product)
                 if results[product] is not None:
                     st.dataframe(_bleed_table(results[product]),
                                  use_container_width=True)
