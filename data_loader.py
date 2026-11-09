@@ -258,15 +258,22 @@ def load_sheets_orders():
 
 # ============================================================
 # LOAD SUPABASE ORDERS — Live app data from Aug 1 2026
+# Quantity comes from TWO columns in the orders table:
+#   gas_kg        → kg of gas ordered (empty if no gas)
+#   petrol_litres → litres of petrol ordered (empty if no petrol)
+# Litre/Kg Sold = gas_kg + petrol_litres (works for gas-only,
+# petrol-only, and orders containing both).
 # ============================================================
 def load_supabase_orders():
     try:
         # --------------------------------------------------------
         # FETCH CLOSED ORDERS
+        # gas_kg and petrol_litres are now included in the select.
         # --------------------------------------------------------
         orders_df = fetch_all_rows(
             "orders",
             select="id,created_at,customer_whatsapp,product,"
+                   "gas_kg,petrol_litres,"
                    "rider_id,petrol_station_id,gas_station_id,"
                    "zone,rider_payout,delivery_fee,grand_total,"
                    "cost_price,margin,vat,deposit_used,"
@@ -295,18 +302,9 @@ def load_supabase_orders():
         # --------------------------------------------------------
         # FETCH SUPPORTING TABLES
         # --------------------------------------------------------
-        customers_df = fetch_all_rows(
-            "customers",
-            select="whatsapp_number,name"
-        )
-        riders_df = fetch_all_rows(
-            "riders",
-            select="id,name"
-        )
-        stations_df = fetch_all_rows(
-            "stations",
-            select="id,station_name"
-        )
+        customers_df = fetch_all_rows("customers", select="whatsapp_number,name")
+        riders_df    = fetch_all_rows("riders", select="id,name")
+        stations_df  = fetch_all_rows("stations", select="id,station_name")
 
         # --------------------------------------------------------
         # MERGE SUPPORTING TABLES
@@ -351,8 +349,7 @@ def load_supabase_orders():
         ).fillna(orders_df["product"])
 
         # --------------------------------------------------------
-        # CLEAN ZONE NAMES
-        # Strip suffixes like "(before T-junction)"
+        # CLEAN ZONE NAMES — strip suffixes like "(before T-junction)"
         # --------------------------------------------------------
         orders_df["zone"] = orders_df["zone"].fillna("Unknown").astype(str).str.split(
             r'\(', expand=True, regex=True
@@ -360,7 +357,6 @@ def load_supabase_orders():
 
         # --------------------------------------------------------
         # PARSE FULFILLMENT AND COMPLETION TIMESTAMPS
-        # Use full datetime objects for accurate duration calculation
         # --------------------------------------------------------
         fulfillment_dt = pd.to_datetime(
             orders_df["fulfillment_start"],
@@ -373,15 +369,15 @@ def load_supabase_orders():
         ).dt.tz_convert("Africa/Lagos").dt.tz_localize(None)
 
         # --------------------------------------------------------
-        # RENAME TO DASHBOARD STANDARD COLUMN NAMES
+        # STANDARD COLUMN NAMES
         # --------------------------------------------------------
         orders_df["Order ID"] = orders_df["agent_order_id"].fillna(
             orders_df["id"].astype(str)
         )
-        orders_df["Date of Order"]    = orders_df["created_at_dt"].dt.strftime("%Y-%m-%d")
-        orders_df["Day of the Week"]  = orders_df["created_at_dt"].dt.strftime("%a")
-        orders_df["Order Type"]       = orders_df["product"]
-        orders_df["Customer Name"]    = orders_df.get(
+        orders_df["Date of Order"]   = orders_df["created_at_dt"].dt.strftime("%Y-%m-%d")
+        orders_df["Day of the Week"] = orders_df["created_at_dt"].dt.strftime("%a")
+        orders_df["Order Type"]      = orders_df["product"]
+        orders_df["Customer Name"]   = orders_df.get(
             "name", orders_df["customer_whatsapp"]
         ).fillna(orders_df["customer_whatsapp"])
         orders_df["Customer Phone"]      = orders_df["customer_whatsapp"]
@@ -390,54 +386,71 @@ def load_supabase_orders():
             "rider_name", pd.Series("Unknown", index=orders_df.index)
         ).fillna("Unknown")
 
-        # Station — use petrol station, fall back to gas station
-        petrol_stn = orders_df.get("petrol_stn", pd.Series(dtype=str))
-        gas_stn    = orders_df.get("gas_stn", pd.Series(dtype=str))
+        # Station — petrol station first, fall back to gas station
+        blank       = pd.Series(None, index=orders_df.index, dtype="object")
+        petrol_stn  = orders_df.get("petrol_stn", blank)
+        gas_stn     = orders_df.get("gas_stn", blank)
         orders_df["Station"] = petrol_stn.fillna(gas_stn).fillna("Unknown")
 
         # Time columns for display only
-        orders_df["Order Time"] = orders_df["created_at_dt"].dt.strftime("%I:%M:%S %p")
+        orders_df["Order Time"]             = orders_df["created_at_dt"].dt.strftime("%I:%M:%S %p")
         orders_df["Fulfillment Start Time"] = fulfillment_dt.dt.strftime("%I:%M:%S %p")
         orders_df["Order Completion Time"]  = completion_dt.dt.strftime("%I:%M:%S %p")
 
-        # Quantity and price
-        orders_df["Litre/Kg Sold"] = safe_num(
-            orders_df.get("quantity", pd.Series(0, index=orders_df.index))
-        )
-        orders_df["Cost Price (Per kg/liter)"] = safe_num(
-            orders_df.get("cost_price_y", orders_df.get("cost_price", pd.Series(0, index=orders_df.index)))
-        )
-        orders_df["Selling Price (Per kg/Liter)"] = safe_num(
-            orders_df.get("selling_price", pd.Series(0, index=orders_df.index))
-        )
+        # --------------------------------------------------------
+        # QUANTITY — gas_kg + petrol_litres
+        # Empty cells count as 0, so:
+        #   gas only    → gas_kg
+        #   petrol only → petrol_litres
+        #   both        → gas_kg + petrol_litres
+        # --------------------------------------------------------
+        gas_kg        = safe_num(orders_df["gas_kg"])
+        petrol_litres = safe_num(orders_df["petrol_litres"])
+        quantity      = gas_kg + petrol_litres
+
+        orders_df["Litre/Kg Sold"] = quantity
 
         # --------------------------------------------------------
         # FINANCIAL MODEL — Supabase
         # GMV     = grand_total (full customer payment)
-        # COGS    = cost_price from orders table
+        # COGS    = cost_price (order-level total cost)
         # Revenue = GMV - COGS
         # Profit  = Revenue - rider_payout
         # --------------------------------------------------------
         grand_total  = safe_num(orders_df["grand_total"])
-        cost_price   = safe_num(orders_df.get("cost_price", pd.Series(0, index=orders_df.index)))
-        rider_payout = safe_num(orders_df.get("rider_payout", pd.Series(0, index=orders_df.index)))
-        delivery_fee = safe_num(orders_df.get("delivery_fee", pd.Series(0, index=orders_df.index)))
-        
+        cost_price   = safe_num(orders_df["cost_price"])
+        rider_payout = safe_num(orders_df["rider_payout"])
+        delivery_fee = safe_num(orders_df["delivery_fee"])
+        vat          = safe_num(orders_df["vat"])
 
         orders_df["Revenue (Total Customer Payment)"] = grand_total
-        orders_df["COGS(naira)"]  = cost_price
-        orders_df["GMV"]          = grand_total
-        orders_df["Revenue"]      = grand_total - cost_price
-        orders_df["Profit"]       = grand_total - cost_price - rider_payout
+        orders_df["COGS(naira)"] = cost_price
+        orders_df["GMV"]         = grand_total
+        orders_df["Revenue"]     = grand_total - cost_price
+        orders_df["Profit"]      = grand_total - cost_price - rider_payout
         orders_df["Delivery Cost (how much we paid to the Rider)"] = rider_payout
         orders_df["Delivery Fee (Amount we Collected from the customer)"] = delivery_fee
 
         # --------------------------------------------------------
-        # DELIVERY TIME FROM FULL TIMESTAMPS
-        # Initiation = Fulfillment Start - Order Time
-        # Delivery   = Completion - Fulfillment Start
-        # Total      = Completion - Order Time
-        # Cap at 90 mins
+        # PER-UNIT PRICES (derived from order totals)
+        # cost_price in orders is the TOTAL order cost, so we divide
+        # by quantity to get cost per kg/litre.
+        # Selling price per unit = product sales only
+        # (grand_total minus delivery fee and VAT) divided by quantity.
+        # Orders with zero quantity are left at 0 to avoid divide-by-zero.
+        # --------------------------------------------------------
+        has_qty = quantity > 0
+        orders_df["Cost Price (Per kg/liter)"] = 0.0
+        orders_df["Selling Price (Per kg/Liter)"] = 0.0
+        orders_df.loc[has_qty, "Cost Price (Per kg/liter)"] = (
+            cost_price[has_qty] / quantity[has_qty]
+        ).round(2)
+        orders_df.loc[has_qty, "Selling Price (Per kg/Liter)"] = (
+            (grand_total - delivery_fee - vat)[has_qty] / quantity[has_qty]
+        ).round(2)
+
+        # --------------------------------------------------------
+        # DELIVERY TIMES FROM FULL TIMESTAMPS (capped at 90 mins)
         # --------------------------------------------------------
         def calc_dur(start, end):
             dur = (end - start).dt.total_seconds() / 60
@@ -445,15 +458,9 @@ def load_supabase_orders():
             dur = dur.where(dur <= 90, None)
             return dur
 
-        orders_df["Initiation Duration (mins)"] = calc_dur(
-            orders_df["created_at_dt"], fulfillment_dt
-        )
-        orders_df["Delivery Duration (mins)"] = calc_dur(
-            fulfillment_dt, completion_dt
-        )
-        orders_df["Total Duration (mins)"] = calc_dur(
-            orders_df["created_at_dt"], completion_dt
-        )
+        orders_df["Initiation Duration (mins)"] = calc_dur(orders_df["created_at_dt"], fulfillment_dt)
+        orders_df["Delivery Duration (mins)"]   = calc_dur(fulfillment_dt, completion_dt)
+        orders_df["Total Duration (mins)"]      = calc_dur(orders_df["created_at_dt"], completion_dt)
 
         # On-time flag — 10 minute threshold on TOTAL journey
         orders_df["On Time"] = orders_df["Total Duration (mins)"].apply(
@@ -466,6 +473,18 @@ def load_supabase_orders():
         )
 
         orders_df["Data Source"] = "Supabase"
+
+        # --------------------------------------------------------
+        # DIAGNOSTIC — check quantity and revenue against Supabase
+        # Expected from direct SQL: 637 orders, ₦5,665,145
+        # --------------------------------------------------------
+        print("\n=== SUPABASE LOAD CHECK ===")
+        print(f"Orders loaded: {len(orders_df)}")
+        print(f"Total grand_total: {grand_total.sum():,.2f}")
+        print(f"Total gas_kg: {gas_kg.sum():,.2f}")
+        print(f"Total petrol_litres: {petrol_litres.sum():,.2f}")
+        print(f"Orders with zero quantity: {(~has_qty).sum()}")
+        print(orders_df["Order Type"].value_counts(dropna=False))
 
         # --------------------------------------------------------
         # KEEP ONLY STANDARD COLUMNS
@@ -487,14 +506,12 @@ def load_supabase_orders():
         ]
         orders_df = orders_df[[c for c in keep_cols if c in orders_df.columns]]
 
-        # Apply standard cleaning
         orders_df = clean_and_enrich(orders_df)
         return orders_df
 
     except Exception as e:
         st.warning(f"Supabase load failed: {e}")
         return pd.DataFrame()
-
 
 # ============================================================
 # LOAD ORDERS — MERGED FROM BOTH SOURCES
